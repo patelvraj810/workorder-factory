@@ -67,6 +67,7 @@ REVIEW_SCHEMA = {
                     "severity": {"type": "string", "enum": ["low", "medium", "high"]},
                     "file": {"type": "string"},
                     "issue": {"type": "string"},
+                    "plain": {"type": "string"},  # one sentence a non-technical person understands
                     "failing_input": {"type": "string"},
                     "suggestion": {"type": "string"},
                 },

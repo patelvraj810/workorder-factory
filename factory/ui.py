@@ -40,6 +40,20 @@ def _ctx(repo: Path):
     return Ctx(argparse.Namespace(repo=str(repo), base=None))
 
 
+PLAIN_CHECK = {
+    "protected paths": "Protected files", "test config tamper": "Test settings", "diff size": "Size of the change",
+    "secret scan": "Passwords and keys", "no float on money": "Exact money maths", "SAST (bandit)": "Security scan",
+    "invariants (human-owned)": "Your rules", "unit tests": "Tests", "independent reviewer agent": "Reviewer agent",
+}
+
+
+TIMELINE_CHECK = {
+    "protected paths": "protected files", "test config tamper": "test settings", "diff size": "the size of the change",
+    "secret scan": "passwords or keys", "no float on money": "money maths", "SAST (bandit)": "the security scan",
+    "invariants (human-owned)": "your rules", "unit tests": "the tests", "independent reviewer agent": "the reviewer AI",
+}
+
+
 def _money(x: float) -> str:
     return f"${x:.2f}"
 
@@ -48,27 +62,32 @@ def describe(e: dict[str, Any]) -> tuple[str, str]:
     """One ledger event in plain English, plus a tone: ok | warn | bad | human | info."""
     d, actor, ev = e.get("data", {}), e.get("actor", ""), e["event"]
     who = actor.replace("agent:", "AI ")
-    cost = f" · {_money(d['cost_usd'])}" if d.get("cost_usd") else ""
+    cost = f" (cost {_money(d['cost_usd'])})" if d.get("cost_usd") else ""
+    def n(k: int, word: str) -> str:
+        return f"{k} {word}" + ("" if k == 1 else "s")
     table = {
-        "workorder.created": (f"Opened by {actor}: {d.get('title', '')}", "human"),
-        "session.started": (f"AI {d.get('role', 'agent')} started ({d.get('model', '')})", "info"),
-        "plan.created": (f"Planned: {len(d.get('features', []))} step(s){cost}", "ok"),
-        "session.completed": (f"Built {d.get('feature', '')}: {d.get('status', '')}"
-                              f" · {len(d.get('files_changed', []))} file(s){cost}",
+        "workorder.created": (f"{actor} asked for this change", "human"),
+        "session.started": ({"planner": "The AI started planning", "implementer": "The AI started building",
+                              "reviewer": "The reviewer AI started reading the change"}.get(d.get("role"), "An AI step started"), "info"),
+        "plan.created": (f"The AI made a plan with {n(len(d.get('features', [])), 'step')}{cost}", "ok"),
+        "session.completed": ((f"The AI finished {d.get('feature', '')}" if d.get("status") == "done"
+                               else f"The AI got stuck on {d.get('feature', '')}")
+                              + f" and changed {n(len(d.get('files_changed', [])), 'file')}{cost}",
                               "ok" if d.get("status") == "done" else "warn"),
-        "session.failed": (f"AI session failed: {str(d.get('error', ''))[:120]}", "bad"),
+        "session.failed": ("An AI step failed and was cleaned up", "bad"),
         "session.abandoned": ("A crashed session was cleaned up (leftovers kept as evidence)", "warn"),
         "workorder.recovered": ("Recovered after a crash", "warn"),
         "session.blocked": (f"Not started: {d.get('reason', '')}", "bad"),
-        "review.completed": (f"Reviewer ({d.get('model', '')}): {d.get('result', '')}, "
-                             f"{d.get('findings', 0)} finding(s){cost}", "info"),
-        "gate.result": (f"Check {d.get('number')}: " + ("passed" if d.get("passed") else
-                        "failed — " + ", ".join(d.get("failed", []))), "ok" if d.get("passed") else "bad"),
+        "review.completed": (("The reviewer AI is happy" if d.get("result") == "approve" else "The reviewer AI asked for changes")
+                             + f", with {n(d.get('findings', 0), 'note')}{cost}", "info"),
+        "gate.result": (f"Checks, round {d.get('number')}: " + ("all passed" if d.get("passed") else
+                        "problems with " + ", ".join(TIMELINE_CHECK.get(x, x) for x in d.get("failed", []))),
+                        "ok" if d.get("passed") else "bad"),
         "gate.accepted": (f"{actor} accepted the reviewer's findings, so check {d.get('number')} passes", "human"),
         "finding.accepted": (f"{actor} accepted finding {d.get('finding')}: “{d.get('reason', '')}”", "human"),
-        "invariant.added": (f"Rule added by {actor}: {d.get('path', '')}", "human"),
-        "workorder.handed_back": (f"Handed back to you: {d.get('reason', '')}", "bad"),
-        "pr.prepared": ("Pull request text written", "ok"),
+        "invariant.added": (f"{actor} added a rule: {Path(d.get('path', '')).stem.replace('test_', '').replace('_', ' ')}", "human"),
+        "workorder.handed_back": ("The AI stopped and handed the work back to a person", "bad"),
+        "pr.prepared": ("The pull request summary was written", "ok"),
         "pr.refused": (f"PR refused: {d.get('reason', '')}", "warn"),
         "approval.refused": (f"Approval refused: {d.get('reason', '')}", "warn"),
         "approval.granted": (f"Approved by {actor}", "human"),
@@ -90,29 +109,38 @@ def _running(ctx, wo_id: str) -> dict | None:
 
 def next_step(status: str, unfinished: list, gate: dict | None, running: dict | None) -> dict[str, str]:
     if running:
-        return {"text": f"An AI {running.get('role', 'agent')} is working now. Watch it under “Live”.", "action": ""}
+        return {"text": "The AI is working on it right now. You can watch below.", "action": ""}
     if status == "open":
-        return {"text": "Next: plan it. Ask your AI “plan WO”, or press Plan.", "action": "plan"}
+        return {"text": "Next, the AI makes a plan: small steps and the risks it sees.", "action": "plan"}
     if status in ("planned", "in progress") and unfinished:
-        return {"text": f"Next: build {unfinished[0]}. Ask your AI, or press Build next step.", "action": "run"}
+        return {"text": f"Next, the AI builds the next step ({unfinished[0]}).", "action": "run"}
     if status in ("planned", "in progress"):
-        return {"text": "All steps are built. Next: run the checks.", "action": "gate"}
+        return {"text": "Everything is built. Next, run the checks.", "action": "gate"}
     if status == "gate FAILED":
         only_review = gate and all(c["passed"] or not c.get("blocking", True) or c["name"] == "independent reviewer agent"
                                    for c in gate["checks"])
         if only_review:
-            return {"text": "Only the reviewer agent objected. Fix it (Build next step), or accept a finding with a reason.",
-                    "action": "run"}
-        return {"text": "A check failed. Next: Build next step — the AI fixes what the check found.", "action": "run"}
+            return {"text": "Only the reviewer AI has a concern. Let the AI fix it, or, if you think it's fine, "
+                            "accept it below with a reason.", "action": "run"}
+        return {"text": "Some checks failed. Next, the AI fixes what they found. You don't need to do anything yet.",
+                "action": "run"}
     if status == "gate passed":
-        return {"text": "Checks passed. Next: write the PR text, then approve.", "action": "pr"}
+        return {"text": "Everything passed. Write the summary, then approve it if you're happy.", "action": "pr"}
     if status == "handed back":
-        return {"text": "The AI stopped and handed this back to you. Fix it yourself and run the checks, "
-                        "or accept reviewer findings with a reason.", "action": "gate"}
+        return {"text": "The AI stopped after too many failed tries and handed this back to you. Read the notes below. "
+                        "You can accept the reviewer's concerns with a reason, or fix it yourself and run the checks.",
+                "action": "gate"}
     if status in ("approved", "merged"):
-        return {"text": "Done.", "action": ""}
+        return {"text": "Done. This change is approved and merged.", "action": ""}
     return {"text": "", "action": ""}
 
+
+STAGES = ["Asked", "Planned", "Built", "Checked", "Approved", "Merged"]
+
+
+def stage_of(status: str, unfinished: list, gate: dict | None) -> int:
+    return {"open": 0, "planned": 1, "in progress": 1 if unfinished else 2, "gate FAILED": 2, "handed back": 2,
+            "gate passed": 3, "approved": 4, "merged": 5}.get(status, 0)
 
 def collect_state(repo: Path, user: str, read_only: str | None) -> dict[str, Any]:
     from factory.cli import derive_status, rules_view, PRESET_INFO
@@ -134,12 +162,12 @@ def collect_state(repo: Path, user: str, read_only: str | None) -> dict[str, Any
         needs_you = status in ("gate passed", "handed back") or (status == "gate FAILED" and not running)
         wos.append({"id": wo_id, "title": e["data"].get("title", ""), "requester": e["actor"], "status": status,
                     "spent": round(ctx.spent(wo_id), 2), "running": bool(running), "needs_you": needs_you,
-                    "next": next_step(status, unfinished, gate, running)})
+                    "stage": stage_of(status, unfinished, gate), "next": next_step(status, unfinished, gate, running)})
     killed = ctx.killed()
     return {
         "project": repo.name, "repo": str(repo), "user": user, "read_only": read_only,
         "base": ctx.base_ref, "killed": killed,
-        "preset": ctx.policy.preset, "presets": PRESET_INFO,
+        "preset": ctx.policy.preset, "presets": PRESET_INFO, "blocking": ctx.policy.blocking_severity,
         "budget": {"session": ctx.policy.max_session_budget_usd, "work_order": ctx.policy.max_workorder_budget_usd},
         "rules": rules_view(ctx.policy),
         "work_orders": list(reversed(wos)),
@@ -170,7 +198,8 @@ def collect_detail(repo: Path, wo_id: str) -> dict[str, Any]:
         findings = []
         for i, f in enumerate((gate.get("review") or {}).get("findings", []), start=1):
             findings.append({"n": i, "severity": f.get("severity"), "file": f.get("file", ""),
-                             "issue": f.get("issue", ""), "failing_input": f.get("failing_input", ""),
+                             "issue": f.get("issue", ""), "plain": f.get("plain", ""),
+                             "failing_input": f.get("failing_input", ""), "suggestion": f.get("suggestion", ""),
                              "accepted": accepted.get(i)})
         out["gate"] = {"number": gate["number"], "passed": gate["passed"], "code_sha": gate.get("code_sha", "")[:10],
                        "checks": [{"name": c["name"], "passed": c["passed"], "blocking": c.get("blocking", True),
@@ -194,6 +223,11 @@ def collect_detail(repo: Path, wo_id: str) -> dict[str, Any]:
     out["live"] = {"session": logs[-1].name.replace(".tools.jsonl", "") if logs else "", "calls": live}
     unfinished = [f["id"] for f in out["features"] if f["status"] != "done"]
     out["next"] = next_step(out["status"], unfinished, gate, running)
+    out["stage"] = stage_of(out["status"], unfinished, gate)
+    out["stages"] = STAGES
+    rules = list(wo.invariants)
+    rules += [e["data"].get("path") for e in events if e["event"] == "invariant.added"]
+    out["rules"] = sorted({r for r in rules if r})
     return out
 
 
@@ -238,13 +272,45 @@ def build_command(body: dict[str, Any], user: str, proposals: list[str]) -> list
     raise ValueError(f"Unknown action {a!r}")
 
 
+DONE_TEXT = {
+    "new": "Work order opened.", "plan": "The plan is ready.", "run": "The AI finished this step.",
+    "gate": "Checks finished: everything passed.", "pr": "The pull request summary is written.",
+    "approve": "Approved and merged.", "rule": "Your rule is added. The AI can never change it.",
+    "accept": "Your decision is recorded.", "kill": "All AI agents are stopped.", "resume": "AI agents may work again.",
+    "rules": "Project rules saved.",
+}
+BOX = set("┏┓┗┛━┃│─┡┩└┘┌┐╇╋┼═║╍ ")
+
+
+def friendly(action: str, ok: bool, output: str) -> str:
+    """One short sentence for a person. The raw output stays available as details."""
+    lines = [ln.strip() for ln in output.splitlines() if ln.strip() and not set(ln.strip()) <= BOX]
+    if action == "gate" and "report:" in output and not ok:
+        return ("Checks finished: some failed. The AI stopped and handed the work back to you."
+                if "STOP LIMIT" in output else "Checks finished: some failed. See below.")
+    if ok:
+        if action == "run" and lines and "blocked" in lines[0].lower():
+            return "The AI got stuck on this step. See its notes below."
+        if action == "accept" and any("Still blocking" in ln for ln in lines):
+            return "Recorded. Other concerns still need a decision."
+        return DONE_TEXT.get(action, "Done.")
+    for key in ("Refused:", "Approval refused:", "Not gating yet:", "Can't accept:", "No change worth", "Write a real",
+                "Kill switch", "is already", "must be", "Unknown", "Switch this folder", "has unsaved",
+                "has uncommitted", "was handed back"):
+        for ln in lines:
+            if key in ln:
+                return ln
+    return lines[-1] if lines else "It didn't work."
+
+
 def run_wo(repo: Path, args: list[str]) -> dict[str, Any]:
     env = {**os.environ, "WO_CHANNEL": "ui", "NO_COLOR": "1", "TERM": "dumb", "COLUMNS": "150",
            "PYTHONPATH": str(FACTORY_ROOT) + (os.pathsep + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else "")}
     p = subprocess.run([sys.executable, "-m", "factory.cli", "--repo", str(repo), *args],
                        capture_output=True, text=True, env=env, timeout=3600)
     out = ANSI.sub("", (p.stdout + ("\n" + p.stderr if p.stderr.strip() else "")).strip())
-    return {"ok": p.returncode == 0, "output": out[-8000:], "command": "wo " + " ".join(args)}
+    ok = p.returncode == 0
+    return {"ok": ok, "message": friendly(args[0], ok, out), "output": out[-8000:], "command": "wo " + " ".join(args)}
 
 
 # --- HTTP ------------------------------------------------------------------------------------------------------

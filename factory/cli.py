@@ -562,9 +562,9 @@ PRESETS = {
                        "require_independent_approver": True},
 }
 PRESET_INFO = {
-    "practice": "Learning or side projects. The reviewer agent advises but never blocks. You can approve your own work.",
-    "normal": "Most team projects. High-severity reviewer findings block. A different person approves.",
-    "money-critical": "Code that moves money or orders. Medium findings block too, smaller changes, a different person approves.",
+    "practice": "For learning and side projects. The reviewer AI gives advice but never stops a change. You can approve your own work.",
+    "normal": "For most team projects. Serious concerns from the reviewer AI stop a change. Someone else must approve.",
+    "money-critical": "For code that moves money or orders. Medium concerns stop a change too, changes must be smaller, and someone else must approve.",
 }
 # key -> (toml section, short label, plain-English meaning, kind, choices). Kind "ro" = shown, not editable here.
 RULE_INFO = {

@@ -652,7 +652,7 @@ def test_dashboard_reads_state_and_runs_only_whitelisted_commands(repo):
     state = ui.collect_state(repo, "priya", None)
     assert state["work_orders"][0]["id"] == "WO-001" and state["rules"]
     detail = ui.collect_detail(repo, "WO-001")
-    assert detail["features"] and any("Opened by vraj" in t["text"] for t in detail["timeline"])
+    assert detail["features"] and any("vraj asked for this change" in t["text"] for t in detail["timeline"])
     assert ui.build_command({"action": "approve", "wo": "WO-001"}, "priya", []) == \
         ["approve", "WO-001", "--by", "priya", "--merge"]
     for bad in ({"action": "approve", "wo": "WO-1; rm -rf /"}, {"action": "rule", "wo": "WO-001", "file": "../x.py"},

@@ -15,7 +15,8 @@
         "file": "orders/validation.py",
         "issue": "Pre-existing, not from this diff: the margin check can still reject an order that closes a position, which conflicts with AGENTS.md rule 5. The implementer flagged it too.",
         "failing_input": "free_margin=10, position +5 XAUUSD, SELL 5 -> INSUFFICIENT_MARGIN",
-        "suggestion": "Human: open a separate work order with an invariant for it."
+        "suggestion": "Human: open a separate work order with an invariant for it.",
+        "plain": "An older problem, not from this change: a trader can still be blocked from closing a position when margin is low. Worth its own work order."
       }
     ]
   }

@@ -28,4 +28,6 @@ Work order {wo_id}: {title}
 
 Severity guide: `high` = wrong money/risk behaviour or security issue. `medium` = missing test for a
 risky case. `low` = style. Be specific: file, line, what breaks, a concrete failing input.
+For every finding, also write `plain`: one or two short sentences a non-technical person understands.
+Say what could go wrong for a user or for the business. No code words, no file names.
 You may read files in the repo. Do not edit anything. Return only the structured output.
