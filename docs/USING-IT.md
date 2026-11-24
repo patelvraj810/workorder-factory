@@ -13,14 +13,14 @@ You need: Python 3.11 or newer, git, and a Claude account (Pro, Max or API key).
 **Easiest way: ask Claude Code to do it.** Open your project folder in VS Code, open the
 Claude Code panel, and paste:
 
-> Install the work-order factory from https://github.com/YOUR_GITHUB_NAME/workorder-factory into
+> Install the work-order factory from https://github.com/patelvraj810/workorder-factory into
 > a virtual environment in my home folder, then run `wo init --user MY_NAME` in this project.
 > Show me what it created.
 
 **Or do it yourself in a terminal:**
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_NAME/workorder-factory ~/workorder-factory
+git clone https://github.com/patelvraj810/workorder-factory ~/workorder-factory
 cd ~/workorder-factory && python3 -m venv .venv && . .venv/bin/activate && pip install -e .
 cd /path/to/your/project
 wo init --user YOUR_NAME

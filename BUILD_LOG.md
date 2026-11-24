@@ -1,7 +1,7 @@
 # Build log
 
 Built mainly by directing an agent (Claude, in an agent session with a shell and file tools), then
-run on my own Mac with live Claude agents. Times are wall-clock. The one line marked **[Vraj]** is
+run on my own Mac with live Claude agents. Times are wall-clock. The line marked **[Vraj]** is
 what I still do before submitting.
 
 ## Timeline
@@ -23,11 +23,14 @@ what I still do before submitting.
 | 00:04–00:50 (24 Nov) | First run on my Mac: install, tests, both demos. Fixed 4 macOS issues | Me + agent |
 | 00:50–01:14 | **First live run with real agents**: 2 failed planner tries (budget cap, blocked output tool), then a full work order; reviewer caught a flip loophole; I wrote the flip-rule invariant; merged. Evidence in `evidence/live-run-1/` | Me + live agents |
 | 01:19–01:45 | Round 4: scripted demo updated to the flip rule (+ `flip_loophole` eval), WO-002 kit for the margin bug the agents found, this log, slide draft | Agent, from my list |
-| **[Vraj]** | Read the guard and gate code, rehearse, record the demo, final edit of the slides | Me |
+| after the live run | Read `factory/agents.py` (guard) and `factory/gate.py` line by line | Me |
+| ~01:50–02:20 | Round 5, "use it myself": I decided to make it a public repo that a non-technical person can use by talking to Claude. Chose 3 items from a list: `wo init` + Claude skill + `.mcp.json`; approval guard; public-repo prep. Agent built them, plus configurable gate commands so it works on non-Python projects | Me decided, agent built |
+| **[Vraj]** | Rehearse, record the demo, final edit of the slides, push to GitHub | Me |
 
 ## What I delegated
 - All code in `factory/`, `sample_repo/`, `evals/`, `tests/`, `demo.sh`.
-- First draft of `docs/DESIGN.md` and `README.md`.
+- First draft of `docs/DESIGN.md`, `README.md` and `docs/USING-IT.md`.
+- Round 5 code: `wo init` and its templates, the Claude skill, the approval guard, configurable gate commands.
 - The demo bug itself: the agent wrote both the buggy session-2 change and the fix, on purpose, to
   reproduce the failure mode the senior engineer described.
 
@@ -44,7 +47,11 @@ what I still do before submitting.
 - **Live run:** I read the reviewer's flip finding, **decided the business rule myself**, and committed
   the invariant under my name before the agent fixed the code.
 - **WO-002:** the agent drafted the margin invariant from my rule; I read it and own it before it runs.
-- Still to read line by line before the interview **[Vraj]**: `factory/agents.py` (guard) and `factory/gate.py`.
+- **Read the two files that matter most line by line:** `factory/agents.py` (the guard) and
+  `factory/gate.py`. If I have to defend one thing in the interview, it's these.
+- **Round 5 decisions:** make it public; make it usable without a terminal (you talk to Claude in VS Code
+  or the desktop app); pick 3 of the proposed items and say no to the rest; keep **one repo, not two**,
+  so one `git clone` runs the whole story (factory + the sample project it works on).
 
 ## What I wrote by hand
 - Almost no code. My work was direction, decisions, review and running it for real.
@@ -71,6 +78,9 @@ what I still do before submitting.
 | 13 | First live planner hit the $1.50 budget cap in 11 s | The agent inherited my personal MCP servers (hundreds of tools in every request) | `strict_mcp_config=True`: agents get only their role's tools | The cost cap and failure record worked on the first real run |
 | 14 | Guard blocked the SDK's own answer tool | Structured output is delivered through a `StructuredOutput` tool call; replays never used it | Allow and log that one tool | **The agent refused to work around the block and reported it.** Replays can't test everything |
 | 15 | Live reviewer failed a change that passed every test | Over-limit account could flip +300 → −300; my invariants only covered pure reductions. **My own scripted "correct" answer had the same flaw** | I decided the flip rule and wrote invariants 5–6; the agent fixed the code. Then I added the same invariants to the scripted demo, rewrote its fix, and added a `flip_loophole` eval case (the new invariant also catches my old scripted answer: `pos=1.01, sell 2.02, limit 1.00`) | The independent reviewer earns its cost. See `evidence/live-run-1/` |
+| 16 | First `wo init` draft would have committed the user's other unsaved work | The shared commit helper runs `git add -A` | `wo init` now commits **only the files it created**; a test checks an unrelated file stays uncommitted | Setup tools run in someone else's repo. Touch only what you made |
+| 17 | Gate said "add the command to  in factory.toml" | The terminal UI library treats `[gate]` as a colour tag and drops it | Reworded | Small, but a non-technical user would be stuck on that line |
+| 18 | Early commit messages included a link to the private build chat | Default attribution lines from the agent tool | Removed from every commit message before the repo goes public | Check commit messages too, not just files, before publishing |
 
 ## Time spent
 | Block | Time |
@@ -81,15 +91,17 @@ what I still do before submitting.
 | First Mac run + macOS fixes | 00:04–00:50 · ~45 min |
 | First live run with real agents | 00:50–01:14 · ~25 min |
 | Round 4: demo follows the flip rule, WO-002 kit, log, slide draft | 01:19–01:45 · ~25 min |
-| **Total so far** | **about 3 h 25 min** |
+| Round 5: `wo init`, Claude skill, approval guard, public-repo prep | ~30 min |
+| **Total so far** | **about 3 h 55 min** |
 | Rehearsal, recording, final slides **[Vraj]** | planned ~1 h 30 min |
 
-**Why over the suggested 4 hours (about 5 h in total):** I chose to spend the extra time on two things,
+**Why over the suggested 4 hours (about 5.5 h in total):** I chose to spend the extra time on three things,
 not on more features. First, understanding: I stopped the build to make sure I could defend every part.
 Second, a real live run: replays can't prove agent fluency, and the live run found 3 problems the
-replays never could (budget cap, blocked answer tool, flip loophole).
+replays never could (budget cap, blocked answer tool, flip loophole). Third, making it usable for real:
+I want to use this factory on my own projects, so round 5 made it work outside the demo.
 **What I cut:** real container isolation, model gateway, parallel workers, GitHub check integration,
-the non-engineer paved road (all design only).
+a hosted paved road for non-engineers (design only; `wo init` + the Claude skill is the local first step).
 
 ## Tools used
 - Claude (agent session with shell + file tools) for planning, code, tests, docs.
