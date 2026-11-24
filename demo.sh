@@ -72,6 +72,6 @@ wo ledger show
 wo stats
 wo ledger verify
 cp .factory/ledger.jsonl /tmp/ledger.bak
-sed -i 's/"actor": "priya"/"actor": "vraj"/' .factory/ledger.jsonl
+python3 -c 'import pathlib; p = pathlib.Path(".factory/ledger.jsonl"); p.write_text(p.read_text().replace("\"actor\": \"priya\"", "\"actor\": \"vraj\""))'   # rewrite history: priya -> vraj
 wo ledger verify || echo "(tamper detected — restoring)"
 cp /tmp/ledger.bak .factory/ledger.jsonl
