@@ -98,7 +98,7 @@ def run_test_command(worktree: Path, cmd: str, invariants: bool) -> tuple[str, s
     out = (p.stdout + p.stderr).strip()
     if p.returncode == 0:
         return "pass", out.splitlines()[-1] if out else "ok"
-    if _is_pytest(shlex.split(cmd)) and p.returncode == 5:
+    if _is_pytest(shlex.split(cmd)) and (p.returncode == 5 or (p.returncode == 4 and "not found" in out)):
         return "none", "no tests found"
     # Keep the useful part: failing test names and Hypothesis' minimal failing example.
     lines = out.splitlines()

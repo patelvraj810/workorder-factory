@@ -74,7 +74,9 @@ class WorkOrderStore:
         return [Feature(**f) for f in json.loads(p.read_text())] if p.exists() else []
 
     def next_feature(self) -> Feature | None:
-        return next((f for f in self.load_features() if f.status == "todo"), None)
+        """The next unfinished feature. A blocked feature is unfinished: the next session retries it
+        with the notes the last one left (in progress.md)."""
+        return next((f for f in self.load_features() if f.status in ("todo", "blocked")), None)
 
     # -- progress ----------------------------------------------------------
     def progress(self) -> str:

@@ -119,6 +119,8 @@ def guard(tool: str, tool_input: dict[str, Any], worktree: Path, policy: Policy)
         ok, rel = _inside(tool_input.get("file_path", ""), worktree)
         if not ok:
             return False, f"write outside the work-order sandbox: {rel}"
+        if rel == ".git" or rel.startswith(".git/"):
+            return False, "git's own files are off-limits"
         if policy.is_protected(rel) or rel.startswith(".factory"):
             return False, f"'{rel}' is human-owned (protected path)"
         if policy.is_secret(rel):
@@ -138,6 +140,27 @@ def guard(tool: str, tool_input: dict[str, Any], worktree: Path, policy: Policy)
             return False, f"command not on the allow-list: {cmd!r}"
         return True, ""
     return False, f"tool '{tool}' is not allowed for this role"
+
+
+FILE_WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+
+
+def hook_decision(tool: str, allowed: bool, reason: str) -> dict:
+    """What the pre-tool hook tells Claude Code.
+
+    Deny: always explicit. Allow for file writes: explicit too. The guard has already checked the
+    path is inside this work order's sandbox and not protected or secret, so the guard is the one
+    authority for writes. Without this, Claude Code's own "is this inside the project?" check can
+    refuse valid sandbox writes (seen live: a project folder whose name ends in a space).
+    Other allowed tools fall through to the normal permission rules (allowed_tools + dontAsk).
+    """
+    if not allowed:
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": f"Blocked by factory policy: {reason}"}}
+    if tool in FILE_WRITE_TOOLS:
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                       "permissionDecisionReason": "Checked by the factory guard: inside the sandbox"}}
+    return {}
 
 
 @dataclass
@@ -198,11 +221,9 @@ class ClaudeBackend:
             target = tin.get("file_path") or tin.get("path") or tin.get("command") or tin.get("pattern") or ""
             tool_log.append({"tool": tool, "target": str(target)[:200], "allowed": str(allowed)})
             _live(self.live_log, {**tool_log[-1], **({"reason": reason} if not allowed else {})})
-            if allowed:
-                return {}
-            denials.append({"tool": tool, "target": str(target)[:200], "reason": reason})
-            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                           "permissionDecisionReason": f"Blocked by factory policy: {reason}"}}
+            if not allowed:
+                denials.append({"tool": tool, "target": str(target)[:200], "reason": reason})
+            return hook_decision(tool, allowed, reason)
 
         model = model_for(role)
         options = ClaudeAgentOptions(

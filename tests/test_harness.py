@@ -513,3 +513,37 @@ def test_mcp_path_starts_agents_but_still_refuses_human_only(monkeypatch):
     assert "CLAUDECODE" not in seen and seen["WO_CHANNEL"] == "mcp"
     monkeypatch.delenv("CLAUDECODE"); monkeypatch.setenv("WO_CHANNEL", "mcp")
     assert agent_session_marker() == "WO_CHANNEL=mcp"
+
+
+def test_hook_allows_checked_writes_explicitly_and_denies_the_rest(tmp_path):
+    from factory.agents import hook_decision
+    pol = load_policy(Path(__file__).resolve().parent.parent / "sample_repo")
+    wt = tmp_path / "proj with space " / "wt"; wt.mkdir(parents=True)
+    ok, why = guard("Write", {"file_path": str(wt / "src" / "tip.py")}, wt, pol)
+    assert ok
+    assert hook_decision("Write", ok, why)["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert hook_decision("Read", True, "") == {}            # reads keep the normal permission rules
+    bad, why = guard("Write", {"file_path": str(wt / ".git")}, wt, pol)
+    assert not bad and hook_decision("Write", bad, why)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    out, why = guard("Edit", {"file_path": str(tmp_path / "elsewhere.py")}, wt, pol)
+    assert not out and "outside" in why
+
+
+def test_blocked_feature_is_retried_and_gate_waits_for_it(repo):
+    from factory.workorder import WorkOrderStore
+    wo(repo, "new", "Per-symbol position limits", "--intent", "limits", "--by", "vraj")
+    wo(repo, "plan", "WO-001")
+    store = WorkOrderStore(repo / ".factory" / "worktrees" / "WO-001", "WO-001")
+    feats = store.load_features(); feats[0].status = "blocked"; store.save_features(feats)
+    wt = repo / ".factory" / "worktrees" / "WO-001"
+    gitops.git(wt, "-c", "user.name=lead", "-c", "user.email=lead@example.com", "commit", "-qam", "mark blocked")
+    assert store.next_feature().id == feats[0].id                     # blocked = unfinished, retried
+    with pytest.raises(SystemExit, match="Not gating yet"):
+        main(["--repo", str(repo), "gate", "WO-001", "--no-review"])
+    assert store.gate_reports() == []                                   # nothing counted toward the stop limit
+
+
+def test_missing_test_folder_is_a_warning_not_a_failure(tmp_path):
+    from factory.gate import check_tests
+    c = check_tests(tmp_path, "unit tests", "python -m pytest -q tests/", invariants=False)
+    assert not c.passed and not c.blocking
