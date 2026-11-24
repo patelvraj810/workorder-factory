@@ -1,0 +1,250 @@
+diff --git a/invariants/test_position_limit_invariants.py b/invariants/test_position_limit_invariants.py
+new file mode 100644
+index 0000000..9c0e927
+--- /dev/null
++++ b/invariants/test_position_limit_invariants.py
+@@ -0,0 +1,80 @@
++"""HUMAN-OWNED INVARIANTS for work order WO-001 (position limits).
++
++Written by the requesting engineer BEFORE any agent runs. Agents must not edit.
++
++Contract the agent must implement:
++- Account.position_limits: dict[str, Decimal]  (max absolute net position per symbol;
++  a missing symbol means "no limit")
++- Reason.POSITION_LIMIT
++"""
++from decimal import Decimal
++
++from hypothesis import assume, given, settings
++from hypothesis import strategies as st
++
++from orders.models import Account, Order, Reason, Side
++from orders.validation import signed_qty, validate_order
++
++SYMBOL = "XAUUSD"  # lot step 0.01, tick 0.01
++lot_qty = st.decimals(min_value=Decimal("0.01"), max_value=Decimal("200"), places=2, allow_nan=False)
++position = st.decimals(min_value=Decimal("-300"), max_value=Decimal("300"), places=2, allow_nan=False)
++limit = st.decimals(min_value=Decimal("1"), max_value=Decimal("250"), places=2, allow_nan=False)
++side = st.sampled_from([Side.BUY, Side.SELL])
++RICH = Decimal("1000000000")  # enough margin that margin never interferes
++PRICE = Decimal("2400.00")
++
++
++def make(pos, lim):
++    return Account("A1", RICH, {SYMBOL: pos}, position_limits={SYMBOL: lim})
++
++
++@settings(max_examples=500, deadline=None)
++@given(position, lot_qty, side, limit)
++def test_inv_limit_1_accepted_orders_never_end_beyond_limit_when_increasing(pos, qty, sd, lim):
++    """If an accepted order increases exposure, the new position is within the limit."""
++    order = Order(SYMBOL, sd, qty, PRICE)
++    new_pos = pos + signed_qty(order)
++    r = validate_order(order, make(pos, lim))
++    if r.accepted and abs(new_pos) > abs(pos):
++        assert abs(new_pos) <= lim
++
++
++@settings(max_examples=500, deadline=None)
++@given(position, lot_qty, limit)
++def test_inv_limit_2_reducing_orders_are_never_blocked_by_the_limit(pos, qty, lim):
++    """A trader must ALWAYS be able to reduce or close a position, even when over the limit."""
++    assume(pos != 0)
++    assume(qty <= abs(pos))
++    sd = Side.SELL if pos > 0 else Side.BUY  # opposite side = reducing
++    r = validate_order(Order(SYMBOL, sd, qty, PRICE), make(pos, lim))
++    assert r.reason is not Reason.POSITION_LIMIT
++
++
++@settings(max_examples=300, deadline=None)
++@given(position, lot_qty, side)
++def test_inv_limit_3_no_limit_configured_means_no_limit_rejections(pos, qty, sd):
++    acct = Account("A1", RICH, {SYMBOL: pos})
++    r = validate_order(Order(SYMBOL, sd, qty, PRICE), acct)
++    assert r.reason is not Reason.POSITION_LIMIT
++
++
++def test_inv_limit_4_exactly_at_limit_is_allowed():
++    r = validate_order(Order(SYMBOL, Side.BUY, Decimal("0.20"), PRICE), make(Decimal("0.10"), Decimal("0.30")))
++    assert r.accepted
++
++
++@settings(max_examples=800, deadline=None)
++@given(position, lot_qty, side, limit)
++def test_inv_limit_5_a_flip_never_opens_new_exposure_beyond_the_limit(pos, qty, sd, lim):
++    """Crossing zero closes the old position and OPENS a new one. The new side must be within the limit."""
++    order = Order(SYMBOL, sd, qty, PRICE)
++    new_pos = pos + signed_qty(order)
++    assume(pos != 0 and new_pos != 0 and (pos > 0) != (new_pos > 0))
++    r = validate_order(order, make(pos, lim))
++    if r.accepted:
++        assert abs(new_pos) <= lim
++
++
++def test_inv_limit_6_flip_landing_exactly_on_the_limit_is_allowed():
++    r = validate_order(Order(SYMBOL, Side.SELL, Decimal("15.00"), PRICE), make(Decimal("5.00"), Decimal("10.00")))
++    assert r.accepted
+diff --git a/orders/models.py b/orders/models.py
+index 472addb..a6752c6 100644
+--- a/orders/models.py
++++ b/orders/models.py
+@@ -22,6 +22,7 @@ class Reason(str, Enum):
+     BAD_LOT_STEP = "BAD_LOT_STEP"
+     BAD_PRICE_TICK = "BAD_PRICE_TICK"
+     INSUFFICIENT_MARGIN = "INSUFFICIENT_MARGIN"
++    POSITION_LIMIT = "POSITION_LIMIT"
+ 
+ 
+ @dataclass(frozen=True)
+@@ -46,6 +47,8 @@ class Account:
+     free_margin: Decimal
+     # Signed net position per symbol. Positive = long, negative = short.
+     positions: dict[str, Decimal] = field(default_factory=dict)
++    # Max absolute net position per symbol. Missing symbol = no limit.
++    position_limits: dict[str, Decimal] = field(default_factory=dict)
+ 
+ 
+ @dataclass(frozen=True)
+diff --git a/orders/validation.py b/orders/validation.py
+index bfdc657..38f35ba 100644
+--- a/orders/validation.py
++++ b/orders/validation.py
+@@ -26,6 +26,23 @@ def required_margin(order: Order) -> Decimal:
+     return order.qty * order.price * inst.margin_rate
+ 
+ 
++def _breaches_position_limit(order: Order, account: Account) -> bool:
++    """True only if the order increases exposure AND ends above the limit.
++
++    Missing limit means no limit; missing position means zero. Reducing or
++    closing orders never breach, even if the account is already over the limit.
++    """
++    limit = account.position_limits.get(order.symbol)
++    if limit is None:
++        return False
++    current = account.positions.get(order.symbol, Decimal(0))
++    new = current + signed_qty(order)
++    if current * new < 0:
++        # Flip through zero opens a brand-new position; it must fit the limit.
++        return abs(new) > limit
++    return abs(new) > abs(current) and abs(new) > limit
++
++
+ def validate_order(order: Order, account: Account) -> ValidationResult:
+     inst = INSTRUMENTS.get(order.symbol)
+     if inst is None:
+@@ -38,4 +55,6 @@ def validate_order(order: Order, account: Account) -> ValidationResult:
+         return ValidationResult.reject(Reason.BAD_PRICE_TICK)
+     if required_margin(order) > account.free_margin:
+         return ValidationResult.reject(Reason.INSUFFICIENT_MARGIN)
++    if _breaches_position_limit(order, account):
++        return ValidationResult.reject(Reason.POSITION_LIMIT)
+     return ValidationResult.ok()
+diff --git a/tests/test_validation.py b/tests/test_validation.py
+index e60f3f5..41de6fd 100644
+--- a/tests/test_validation.py
++++ b/tests/test_validation.py
+@@ -24,6 +24,71 @@ def test_zero_qty_rejected():
+     assert r.reason is Reason.NON_POSITIVE_QTY
+ 
+ 
++def _lim(side, qty, pos=None, limit="10", sym="XAUUSD", limits=None):
++    positions = {} if pos is None else {"XAUUSD": D(pos)}
++    if limits is None:
++        limits = {sym: D(limit)}
++    a = Account("A1", D("1000000"), positions, position_limits=limits)
++    return validate_order(Order("XAUUSD", side, D(qty), D("2400.00")), a)
++
++
++def test_limit_flat_buy_and_sell_at_and_over():
++    assert _lim(Side.BUY, "10").accepted
++    assert _lim(Side.SELL, "10").accepted
++    assert _lim(Side.BUY, "10.01").reason is Reason.POSITION_LIMIT
++    assert _lim(Side.SELL, "10.01").reason is Reason.POSITION_LIMIT
++
++
++def test_limit_long_and_short_increase():
++    assert _lim(Side.BUY, "4", pos="6").accepted
++    assert _lim(Side.BUY, "4.01", pos="6").reason is Reason.POSITION_LIMIT
++    assert _lim(Side.SELL, "4", pos="-6").accepted
++    assert _lim(Side.SELL, "4.01", pos="-6").reason is Reason.POSITION_LIMIT
++
++
++def test_limit_reducing_while_over_limit_allowed():
++    assert _lim(Side.SELL, "1", pos="300", limit="100").accepted
++    assert _lim(Side.BUY, "1", pos="-300", limit="100").accepted
++    assert _lim(Side.SELL, "300", pos="300", limit="100").accepted
++    # increasing while already over limit is rejected
++    assert _lim(Side.BUY, "1", pos="300", limit="100").reason is Reason.POSITION_LIMIT
++
++
++def test_limit_flip_across_zero():
++    assert _lim(Side.SELL, "12", pos="5").accepted  # -7, within 10
++    assert _lim(Side.BUY, "12", pos="-5").accepted  # +7
++    assert _lim(Side.SELL, "16", pos="5").reason is Reason.POSITION_LIMIT  # -11
++    assert _lim(Side.BUY, "16", pos="-5").reason is Reason.POSITION_LIMIT  # +11
++
++
++def test_limit_flip_into_over_limit_rejected():
++    # a flip opens a new position that must fit the limit, even if abs shrinks
++    assert _lim(Side.SELL, "500", pos="300", limit="100").reason is Reason.POSITION_LIMIT
++    assert _lim(Side.SELL, "600", pos="300", limit="100").reason is Reason.POSITION_LIMIT
++    assert _lim(Side.BUY, "500", pos="-300", limit="100").reason is Reason.POSITION_LIMIT
++    assert _lim(Side.BUY, "600", pos="-300", limit="100").reason is Reason.POSITION_LIMIT
++
++
++def test_limit_flip_landing_exactly_on_limit_allowed():
++    assert _lim(Side.SELL, "15", pos="5").accepted  # -10
++    assert _lim(Side.BUY, "15", pos="-5").accepted  # +10
++    assert _lim(Side.SELL, "400", pos="300", limit="100").accepted  # -100
++    assert _lim(Side.SELL, "300", pos="300", limit="100").accepted  # close
++
++
++def test_no_limit_or_other_symbol_limit():
++    assert _lim(Side.BUY, "500", limits={}).accepted
++    assert _lim(Side.BUY, "500", limits={"US500": D("1")}).accepted
++
++
++def test_limit_does_not_mutate():
++    a = Account("A1", D("1000000"), {"XAUUSD": D("5")}, position_limits={"XAUUSD": D("10")})
++    o = Order("XAUUSD", Side.BUY, D("20"), D("2400.00"))
++    validate_order(o, a)
++    assert a == Account("A1", D("1000000"), {"XAUUSD": D("5")}, position_limits={"XAUUSD": D("10")})
++    assert o == Order("XAUUSD", Side.BUY, D("20"), D("2400.00"))
++
++
+ def test_bad_lot_step():
+     r = validate_order(Order("EURUSD", Side.BUY, D("1500"), D("1.08000")), acct())
+     assert r.reason is Reason.BAD_LOT_STEP
+@@ -37,3 +102,31 @@ def test_bad_tick():
+ def test_insufficient_margin():
+     r = validate_order(Order("XAUUSD", Side.BUY, D("100.00"), D("2400.00")), acct("10"))
+     assert r.reason is Reason.INSUFFICIENT_MARGIN
++
++
++def test_account_position_limits_default_empty_and_not_shared():
++    a = Account("A1", D("1"))
++    b = Account("A2", D("1"))
++    assert a.position_limits == {}
++    assert a.position_limits is not b.position_limits
++    a.position_limits["XAUUSD"] = D("5")
++    assert b.position_limits == {}
++
++
++def test_account_positional_and_keyword_limits():
++    a = Account("A1", D("1"), {"XAUUSD": D("-2")}, position_limits={"XAUUSD": D("5")})
++    assert a.positions == {"XAUUSD": D("-2")}
++    assert a.position_limits == {"XAUUSD": D("5")}
++
++
++def test_position_limit_reason_code():
++    assert Reason.POSITION_LIMIT.value == "POSITION_LIMIT"
++
++
++def test_over_limit_account_reducing_accepted_increasing_rejected():
++    # Account is over its limit (3 vs 1): only reducing orders pass (F2 enforcement).
++    for side, pos, ok in [(Side.BUY, "3", False), (Side.SELL, "3", True),
++                          (Side.BUY, "-3", True), (Side.SELL, "-3", False)]:
++        a = Account("A1", D("100000"), {"XAUUSD": D(pos)}, position_limits={"XAUUSD": D("1")})
++        r = validate_order(Order("XAUUSD", side, D("1.00"), D("2400.00")), a)
++        assert r.accepted is ok

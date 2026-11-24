@@ -7,7 +7,7 @@ invariants. Agents do the work in a sandbox across many sessions. Independent ga
 before any human spends time on it. Every agent step leaves a signed, hash-chained provenance
 record (FINOS MI-23). A different human approves. Production deploy stays in the normal release pipeline.
 
-Design: [`docs/DESIGN.md`](docs/DESIGN.md) · What I refuse to build: [`WOULD-NOT-SHIP.md`](WOULD-NOT-SHIP.md) ·
+Live run with real agents: [`evidence/live-run-1/`](evidence/live-run-1/README.md) · Design: [`docs/DESIGN.md`](docs/DESIGN.md) · What I refuse to build: [`WOULD-NOT-SHIP.md`](WOULD-NOT-SHIP.md) ·
 Use it from Claude Code / Cursor / Codex: [`docs/MCP.md`](docs/MCP.md) · Build log: [`BUILD_LOG.md`](BUILD_LOG.md)
 
 ## What it shows
@@ -67,7 +67,7 @@ the exact red→green story every time. That's fine: the gate is the point.
 
 | Part | Real | Mocked / limited |
 |---|---|---|
-| Agents | Claude Agent SDK backend: tool allow-list, path guard hook, budget cap, structured output | Demo runs on **scripted replays** (the build sandbox had no live API). Re-record with `RECORD_TO` |
+| Agents | Claude Agent SDK backend: tool allow-list, path guard hook, budget cap, structured output. **One full live run** in `evidence/live-run-1/` (real catch, $0.70) | The demo script runs on **scripted replays** so it's fast and repeatable |
 | Sandbox | One git worktree per work order; guard blocks writes outside it, to protected paths, secrets, and non-allow-listed commands | **No OS isolation.** A test file can run any Python. Production: container per session, no network, no real credentials |
 | Gate | All 9 checks run for real: invariants (Hypothesis), unit tests, bandit, secret scan, diff cap, protected paths, test-config tamper, domain lint, reviewer agent | Reviewer verdicts in the demo are replays |
 | Provenance & ledger | FINOS MI-23 fields per agent step, written **before** the agent starts (fail closed); hash chain; HMAC signatures | Local file + shared-secret HMAC. Production: write-once storage + KMS/Sigstore signing |

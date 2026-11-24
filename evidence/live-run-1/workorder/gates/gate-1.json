@@ -1,0 +1,107 @@
+{
+  "work_order": "WO-001",
+  "code_sha": "7e5e78f009b4cff7069aa3dd67b3e166450921ea",
+  "base": "main",
+  "passed": false,
+  "checks": [
+    {
+      "name": "protected paths",
+      "passed": true,
+      "detail": "changed only by humans: invariants/test_position_limit_invariants.py (vraj@example.com) \u2014 needs CODEOWNERS approval",
+      "blocking": true
+    },
+    {
+      "name": "test config tamper",
+      "passed": true,
+      "detail": "no agent changes to conftest/pytest config",
+      "blocking": true
+    },
+    {
+      "name": "diff size",
+      "passed": true,
+      "detail": "165 changed lines in 4 files (limit 250)",
+      "blocking": true
+    },
+    {
+      "name": "secret scan",
+      "passed": true,
+      "detail": "no secrets in added lines",
+      "blocking": true
+    },
+    {
+      "name": "no float on money",
+      "passed": true,
+      "detail": "no float in orders/",
+      "blocking": true
+    },
+    {
+      "name": "SAST (bandit)",
+      "passed": true,
+      "detail": "2 files, 0 low-severity notes",
+      "blocking": true
+    },
+    {
+      "name": "invariants (human-owned)",
+      "passed": true,
+      "detail": "7 passed in 1.24s",
+      "blocking": true
+    },
+    {
+      "name": "unit tests",
+      "passed": true,
+      "detail": "17 passed in 0.01s",
+      "blocking": true
+    },
+    {
+      "name": "independent reviewer agent",
+      "passed": false,
+      "detail": "request_changes: 1 blocking finding(s), 5 total",
+      "blocking": true
+    }
+  ],
+  "review": {
+    "verdict": "request_changes",
+    "summary": "The limit check is pure, uses Decimal throughout, rejects with a single reason (POSITION_LIMIT), and handles BUY/SELL, long/short and exact boundaries correctly. I'm requesting changes for one risk gap. The 'reducing is always allowed' exemption tests whether abs(new) <= abs(current). That also lets an over-limit account flip through zero into a brand-new opposite position that is itself over the limit. The author's own test (test_limit_flip_reducing_abs_while_over_limit_allowed) locks this behaviour in. The human-owned invariants don't catch it, because inv 2 only generates qty <= abs(pos) and inv 1 only checks orders where abs grows. A stricter rule would still pass every invariant. The intent is ambiguous on flips, so a human should decide. A separate issue already in the code: the margin check runs before the reducing exemption, so a closing order can still be rejected (rule 5).",
+    "findings": [
+      {
+        "severity": "high",
+        "file": "orders/validation.py:40",
+        "issue": "The reducing exemption is judged only by absolute size: `abs(new) > abs(current)`. An order that crosses zero is treated as 'reducing' as long as the new opposite-side position is no larger than the old one, even when that new position is far over the limit. The part of the order beyond flat opens new exposure in the other direction, which is exactly what a per-symbol max is meant to block. An over-limit account can stay over the limit indefinitely by flipping back and forth.",
+        "failing_input": "position_limits={XAUUSD: 100}, positions={XAUUSD: 300}, Order(XAUUSD, SELL, 600.00, 2400.00) -> new position -300 (3x the limit, all newly opened short). Currently ACCEPTED. Also SELL 500 from +300 -> -200, which test_limit_flip_reducing_abs_while_over_limit_allowed asserts is accepted.",
+        "suggestion": "Treat an order as reducing only if it does not cross zero: `current != 0 and sign(new) in (sign(current), 0) and abs(new) < abs(current)`. Otherwise require `abs(new) <= limit`. Closing to flat, or any partial reduction, is still always allowed, and this passes all 4 invariants. A human should confirm the intended flip semantics, then update test_limit_flip_reducing_abs_while_over_limit_allowed to match."
+      },
+      {
+        "severity": "medium",
+        "file": "tests/test_validation.py:61",
+        "issue": "The only test covering an over-limit flip asserts the risky behaviour as correct, and nothing tests flips that land exactly on the limit. The invariant suite never generates flips for reducing orders (inv 2 assumes qty <= abs(pos)), so whatever flip rule is chosen is protected only by this one example.",
+        "failing_input": "Missing cases: pos=5, limit=10, SELL 15 -> -10 (exactly at the limit after a flip); pos=-5, BUY 15 -> +10; pos=300, limit=100, SELL 600 -> -300 (equal-size flip over the limit).",
+        "suggestion": "Add exact-boundary flip tests on both sides, plus over-limit equal-size flip tests that match the chosen semantics."
+      },
+      {
+        "severity": "medium",
+        "file": "orders/validation.py:53",
+        "issue": "This issue was already in the code before this diff. The margin check runs before the limit check and ignores whether the order reduces the position. A trader with little free margin cannot close a position, which breaks AGENTS.md rule 5. The new limit logic is correctly exempt for reducing orders, but the overall 'can always reduce or close' guarantee still fails. No test covers a reducing order with low margin.",
+        "failing_input": "Account(free_margin=10, positions={XAUUSD: 5}), Order(XAUUSD, SELL, 5.00, 2400.00) -> rejected INSUFFICIENT_MARGIN.",
+        "suggestion": "Out of scope for WO-001 (one feature per session). Raise it as a separate work order to exempt reducing orders from the margin check."
+      },
+      {
+        "severity": "low",
+        "file": "orders/models.py:51",
+        "issue": "Limit values are never validated. A negative limit silently blocks every increasing order, and a limit that isn't a Decimal would compare however Python happens to allow. The contract does not say how to handle these.",
+        "failing_input": "position_limits={XAUUSD: Decimal('-1')} -> every increasing order rejected with POSITION_LIMIT.",
+        "suggestion": "Ask the human whether limits must be non-negative Decimals. If so, check this where the configuration is loaded rather than in validate_order."
+      },
+      {
+        "severity": "low",
+        "file": "invariants/test_position_limit_invariants.py",
+        "issue": "This file is human-owned and was added in this diff (author vraj@example.com, so not written by the agent). The protected-path check needs CODEOWNERS approval before merge. Its contents match the implementation, and all 7 invariant tests pass.",
+        "suggestion": "Get CODEOWNERS sign-off. If you choose the stricter flip rule, consider having a human add an invariant: 'an accepted order that crosses zero ends with abs(new) <= limit'."
+      }
+    ]
+  },
+  "reviewer_model": "opus",
+  "cost_usd": 0.18550719999999998,
+  "ts": "2026-11-24T06:07:22+00:00",
+  "summary_md": "Gate on `7e5e78f009`: **FAIL**\n\n- [PASS] **protected paths**: changed only by humans: invariants/test_position_limit_invariants.py (vraj@example.com) \u2014 needs CODEOWNERS approval\n- [PASS] **test config tamper**: no agent changes to conftest/pytest config\n- [PASS] **diff size**: 165 changed lines in 4 files (limit 250)\n- [PASS] **secret scan**: no secrets in added lines\n- [PASS] **no float on money**: no float in orders/\n- [PASS] **SAST (bandit)**: 2 files, 0 low-severity notes\n- [PASS] **invariants (human-owned)**: 7 passed in 1.24s\n- [PASS] **unit tests**: 17 passed in 0.01s\n- [FAIL] **independent reviewer agent**: request_changes: 1 blocking finding(s), 5 total\n\nReviewer (opus) verdict: **request_changes** \u2014 The limit check is pure, uses Decimal throughout, rejects with a single reason (POSITION_LIMIT), and handles BUY/SELL, long/short and exact boundaries correctly. I'm requesting changes for one risk gap. The 'reducing is always allowed' exemption tests whether abs(new) <= abs(current). That also lets an over-limit account flip through zero into a brand-new opposite position that is itself over the limit. The author's own test (test_limit_flip_reducing_abs_while_over_limit_allowed) locks this behaviour in. The human-owned invariants don't catch it, because inv 2 only generates qty <= abs(pos) and inv 1 only checks orders where abs grows. A stricter rule would still pass every invariant. The intent is ambiguous on flips, so a human should decide. A separate issue already in the code: the margin check runs before the reducing exemption, so a closing order can still be rejected (rule 5).\n  - (high) orders/validation.py:40: The reducing exemption is judged only by absolute size: `abs(new) > abs(current)`. An order that crosses zero is treated as 'reducing' as long as the new opposite-side position is no larger than the old one, even when that new position is far over the limit. The part of the order beyond flat opens new exposure in the other direction, which is exactly what a per-symbol max is meant to block. An over-limit account can stay over the limit indefinitely by flipping back and forth. Failing input: position_limits={XAUUSD: 100}, positions={XAUUSD: 300}, Order(XAUUSD, SELL, 600.00, 2400.00) -> new position -300 (3x the limit, all newly opened short). Currently ACCEPTED. Also SELL 500 from +300 -> -200, which test_limit_flip_reducing_abs_while_over_limit_allowed asserts is accepted.\n  - (medium) tests/test_validation.py:61: The only test covering an over-limit flip asserts the risky behaviour as correct, and nothing tests flips that land exactly on the limit. The invariant suite never generates flips for reducing orders (inv 2 assumes qty <= abs(pos)), so whatever flip rule is chosen is protected only by this one example. Failing input: Missing cases: pos=5, limit=10, SELL 15 -> -10 (exactly at the limit after a flip); pos=-5, BUY 15 -> +10; pos=300, limit=100, SELL 600 -> -300 (equal-size flip over the limit).\n  - (medium) orders/validation.py:53: This issue was already in the code before this diff. The margin check runs before the limit check and ignores whether the order reduces the position. A trader with little free margin cannot close a position, which breaks AGENTS.md rule 5. The new limit logic is correctly exempt for reducing orders, but the overall 'can always reduce or close' guarantee still fails. No test covers a reducing order with low margin. Failing input: Account(free_margin=10, positions={XAUUSD: 5}), Order(XAUUSD, SELL, 5.00, 2400.00) -> rejected INSUFFICIENT_MARGIN.\n  - (low) orders/models.py:51: Limit values are never validated. A negative limit silently blocks every increasing order, and a limit that isn't a Decimal would compare however Python happens to allow. The contract does not say how to handle these. Failing input: position_limits={XAUUSD: Decimal('-1')} -> every increasing order rejected with POSITION_LIMIT.\n  - (low) invariants/test_position_limit_invariants.py: This file is human-owned and was added in this diff (author vraj@example.com, so not written by the agent). The protected-path check needs CODEOWNERS approval before merge. Its contents match the implementation, and all 7 invariant tests pass.",
+  "number": 1
+}

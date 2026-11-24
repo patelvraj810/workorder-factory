@@ -19,7 +19,9 @@ Times are wall-clock. Sections marked **[Vraj]** are for me to fill in honestly 
 | 23:00–23:12 | Round 2: audit-first (fail closed), FINOS MI-23 provenance + `wo provenance`, signed ledger, stop limit + hand-back, work-order budget, kill switch, MCP server, delivery-health stats, WOULD-NOT-SHIP.md, README real-vs-mocked, DESIGN.md control map | Agent, from my list |
 | 23:15–23:33 | Looked at four well-known open-source projects (Paperclip, Backstage, Dagger, Temporal) for one small idea each that fits the assignment | Me + agent |
 | 23:33–23:43 | Round 3: crash recovery (durable work orders), `wo ci` + GitHub Actions workflow, agent scorecard, `catalog-info.yaml` owner + risk tier, docs | Agent, from my list |
-| **[Vraj]** | Review of code, design doc, live run on my laptop, re-record replays, slides/recording | Me |
+| 00:04–00:50 (24 Nov) | First run on my Mac: install, tests, both demos. Fixed 4 macOS issues | Me + agent |
+| 00:50–01:14 | **First live run with real agents**: 2 failed planner tries (budget cap, blocked output tool), then a full work order; reviewer caught a flip loophole; I wrote the flip-rule invariant; merged. Evidence in `evidence/live-run-1/` | Me + live agents |
+| **[Vraj]** | Review of code, design doc, slides/recording | Me |
 
 ## What I delegated
 - All code in `factory/`, `sample_repo/`, `evals/`, `tests/`, `demo.sh`.
@@ -52,6 +54,10 @@ Times are wall-clock. Sections marked **[Vraj]** are for me to fill in honestly 
 | 9 | A crashed session's tool calls were lost | The tool log was only kept in memory, so a hard kill erased it | Every tool call is written to `sessions/<key>.tools.jsonl` the moment it happens (fsync) | "Record what the agent touched" must survive the crash, not only the happy path |
 | 10 | The gate could test files that weren't committed | pytest runs on the working files, but the report names a commit | The gate refuses to run while uncommitted changes exist that no agent owns | A report must describe exactly the commit it names |
 | 11 | Failure demo stopped early again | `\| head` + `pipefail` (same as #4) | `sed -n` instead of `head` | The same mistake twice: I should have added a lint for it |
+| 12 | Four macOS-only problems on my first Mac run | Old bash 3.2 (empty list under `set -u`), macOS `sed -i`, a lost "can run" permission after an edit, and the editable install being skipped | Fixed in the demo scripts; demos set `PYTHONPATH` | Test on the machine you demo on. The Linux tests passed every time |
+| 13 | First live planner hit the $1.50 budget cap in 11 s | The agent inherited my personal MCP servers (hundreds of tools in every request) | `strict_mcp_config=True`: agents get only their role's tools | The cost cap and failure record worked on the first real run |
+| 14 | Guard blocked the SDK's own answer tool | Structured output is delivered through a `StructuredOutput` tool call; replays never used it | Allow and log that one tool | **The agent refused to work around the block and reported it.** Replays can't test everything |
+| 15 | Live reviewer failed a change that passed every test | Over-limit account could flip +300 → −300; my invariants only covered pure reductions. **My own scripted "correct" answer had the same flaw** | I decided the flip rule and wrote invariants 5–6; the agent fixed the code | The independent reviewer earns its cost. See `evidence/live-run-1/` |
 | 5 | Diff-size count includes the human's invariant file | Gate counts all non-`.factory` lines | Left as is, noted | Open question: should human-owned lines count toward the agent's diff budget? |
 
 ## Time spent  **[Vraj — update]**

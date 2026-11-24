@@ -1,0 +1,11 @@
+{"tool": "Glob", "target": "**/*", "allowed": "True"}
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/models.py", "allowed": "True"}
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/validation.py", "allowed": "True"}
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/invariants/test_position_limit_invariants.py", "allowed": "True"}
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/tests/test_validation.py", "allowed": "True"}
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/invariants/test_order_invariants.py", "allowed": "True"}
+{"tool": "Glob", "target": "**/*.py", "allowed": "True"}
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/invariants/test_position_limit_invariants.py", "allowed": "True"}
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/models.py", "allowed": "True"}
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/validation.py", "allowed": "True"}
+{"tool": "StructuredOutput", "target": "final structured answer", "allowed": "True"}

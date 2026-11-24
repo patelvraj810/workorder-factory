@@ -1,0 +1,82 @@
+{
+  "role": "planner",
+  "model": "sonnet",
+  "harness": "wo-factory/0.2 + claude-agent-sdk/0.2.188",
+  "session_id": "160ded75-d8bd-48a5-af0c-eddcd02db30e",
+  "started_seq": 7,
+  "cost_usd": 0.0451499,
+  "tokens": {
+    "in": 21168,
+    "out": 2008
+  },
+  "tool_calls": [
+    {
+      "tool": "Glob",
+      "target": "**/*.py",
+      "allowed": "True"
+    },
+    {
+      "tool": "Read",
+      "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/invariants/test_position_limit_invariants.py",
+      "allowed": "True"
+    },
+    {
+      "tool": "Read",
+      "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/models.py",
+      "allowed": "True"
+    },
+    {
+      "tool": "Read",
+      "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/validation.py",
+      "allowed": "True"
+    },
+    {
+      "tool": "StructuredOutput",
+      "target": "final structured answer",
+      "allowed": "True"
+    }
+  ],
+  "denied": [],
+  "output": {
+    "features": [
+      {
+        "id": "F1",
+        "title": "Add position_limits field to Account and Reason.POSITION_LIMIT (no behavior change)",
+        "acceptance": [
+          "Account has `position_limits: dict[str, Decimal]` with default_factory=dict, declared AFTER `positions` so the existing positional call Account(id, margin, positions) still works and `position_limits=` is accepted as keyword",
+          "Reason.POSITION_LIMIT = \"POSITION_LIMIT\" added (UPPER_SNAKE_CASE)",
+          "validate_order is unchanged; all of tests/ and invariants/test_order_invariants.py still pass",
+          "Unit test confirms Account defaults to empty position_limits and that two Accounts do not share the same dict",
+          "No float used anywhere; invariants/, factory.toml, CODEOWNERS and .github/ untouched"
+        ]
+      },
+      {
+        "id": "F2",
+        "title": "Enforce per-symbol position limit in validate_order for exposure-increasing orders only",
+        "acceptance": [
+          "Add a small typed helper (e.g. `_breaches_position_limit(order, account) -> bool`) in orders/validation.py; the logic is: limit = account.position_limits.get(symbol); if limit is None return False; current = account.positions.get(symbol, Decimal(0)); new = current + signed_qty(order); breach only if abs(new) > abs(current) AND abs(new) > limit",
+          "Check runs after the structural checks (instrument/qty/lot/tick) and returns exactly one Reason.POSITION_LIMIT rejection; it is placed with the risk checks",
+          "Missing symbol in position_limits means no limit; a missing position is treated as Decimal(0)",
+          "Exactly at the limit is accepted (abs(new) == limit), one lot step over is rejected",
+          "Reducing or closing orders are never rejected with POSITION_LIMIT, including when the account is already over the limit (e.g. pos=+300, limit=100, SELL 1 is accepted)",
+          "A flip order (e.g. long 5 -> SELL 12 gives -7, limit 10) is accepted when abs(new) <= limit, and rejected when abs(new) > limit and abs(new) > abs(current)",
+          "New tests in tests/test_validation.py cover BUY and SELL, long and short and flat positions, at-limit, over-limit, reducing while over-limit, flip across zero, no limit configured, and limit for a different symbol only",
+          "validate_order does not mutate account or order (compare before/after in a test)",
+          "`python -m pytest -q tests/` and `python -m pytest -q invariants/` both pass (including invariants/test_position_limit_invariants.py); change is under ~100 lines"
+        ]
+      }
+    ],
+    "risks": [
+      "Using abs(new) > limit alone (without the abs(new) > abs(current) guard) blocks reducing orders when already over the limit, which violates invariant 2 and AGENTS.md rule 5.",
+      "Checking the limit against order.qty instead of the resulting net position (current + signed_qty) gives wrong results for shorts and for BUY vs SELL; sign errors on SELL are easy to make.",
+      "Flip orders (long to short through zero) are neither plain reductions nor plain increases. Judge them by the final abs(new) vs abs(current), not by side alone.",
+      "Existing margin check runs on all orders, including reducing ones, so a reducing order can still be rejected for INSUFFICIENT_MARGIN. This is a pre-existing behavior that conflicts with AGENTS.md rule 5. The invariants use RICH margin so they will not catch it. Do not silently change it. Flag it in the notes for a human.",
+      "Check ordering: if the limit check runs before the margin check, an order failing both reports POSITION_LIMIT instead of INSUFFICIENT_MARGIN. Keep it with the risk checks and keep exactly one Reason per rejection.",
+      "A missing key must mean no limit. Do not use `.get(symbol, 0)` for the limit, because that would reject everything. Treat missing positions as 0 but missing limits as None.",
+      "Never convert to float or build Decimals from floats. Use Decimal(0), not 0.0. Mixing int literals is fine, float is not.",
+      "Adding the Account field in the wrong position, or without default_factory, breaks existing Account(...) callers and the shared mutable default.",
+      "Do not mutate account.positions or position_limits, for example by using setdefault. validate_order must stay pure.",
+      "Invariant files, factory.toml, CODEOWNERS and .github/ are human-owned. If an invariant looks wrong, stop and note it rather than editing."
+    ]
+  }
+}

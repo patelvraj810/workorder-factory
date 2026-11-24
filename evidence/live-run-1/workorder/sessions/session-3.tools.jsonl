@@ -1,0 +1,10 @@
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/validation.py", "allowed": "True"}
+{"tool": "Bash", "target": "git log --stat -3 --format=%h\\ %s", "allowed": "False", "reason": "command not on the allow-list: 'git log --stat -3 --format=%h\\\\ %s'"}
+{"tool": "Grep", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/invariants/test_position_limit_invariants.py", "allowed": "True"}
+{"tool": "Grep", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/tests/test_validation.py", "allowed": "True"}
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/tests/test_validation.py", "allowed": "True"}
+{"tool": "Edit", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/validation.py", "allowed": "True"}
+{"tool": "Edit", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/tests/test_validation.py", "allowed": "True"}
+{"tool": "Bash", "target": "python -m pytest -q tests/", "allowed": "True"}
+{"tool": "Bash", "target": "python -m pytest -q invariants/", "allowed": "True"}
+{"tool": "StructuredOutput", "target": "final structured answer", "allowed": "True"}

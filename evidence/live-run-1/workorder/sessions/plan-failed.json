@@ -1,0 +1,6 @@
+{
+  "role": "planner",
+  "started_seq": 1,
+  "error": "Claude Code returned an error result: Reached maximum budget ($1.5) (exit code: 1)",
+  "error_type": "ResultError"
+}

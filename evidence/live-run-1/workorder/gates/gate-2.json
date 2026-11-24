@@ -1,0 +1,99 @@
+{
+  "work_order": "WO-001",
+  "code_sha": "142acb13407074880e077047bc3082a812b7e607",
+  "base": "main",
+  "passed": true,
+  "checks": [
+    {
+      "name": "protected paths",
+      "passed": true,
+      "detail": "changed only by humans: invariants/test_position_limit_invariants.py (vraj@example.com) \u2014 needs CODEOWNERS approval",
+      "blocking": true
+    },
+    {
+      "name": "test config tamper",
+      "passed": true,
+      "detail": "no agent changes to conftest/pytest config",
+      "blocking": true
+    },
+    {
+      "name": "diff size",
+      "passed": true,
+      "detail": "195 changed lines in 4 files (limit 250)",
+      "blocking": true
+    },
+    {
+      "name": "secret scan",
+      "passed": true,
+      "detail": "no secrets in added lines",
+      "blocking": true
+    },
+    {
+      "name": "no float on money",
+      "passed": true,
+      "detail": "no float in orders/",
+      "blocking": true
+    },
+    {
+      "name": "SAST (bandit)",
+      "passed": true,
+      "detail": "2 files, 0 low-severity notes",
+      "blocking": true
+    },
+    {
+      "name": "invariants (human-owned)",
+      "passed": true,
+      "detail": "9 passed in 3.04s",
+      "blocking": true
+    },
+    {
+      "name": "unit tests",
+      "passed": true,
+      "detail": "18 passed in 0.01s",
+      "blocking": true
+    },
+    {
+      "name": "independent reviewer agent",
+      "passed": true,
+      "detail": "approve: 0 blocking finding(s), 4 total",
+      "blocking": true
+    }
+  ],
+  "review": {
+    "summary": "The position-limit logic in orders/validation.py:29-43 is correct for every case I traced: BUY and SELL, long and short, flat, exact boundaries, accounts already over their limit, flips across zero, a missing limit and a missing position. It uses Decimal only, does not change its inputs, and every rejection returns the single Reason.POSITION_LIMIT. Reducing or closing an over-limit position is never blocked by the limit check. A flip is checked only on the size of the new opposite position, which matches the human's flip rule (invariants 5 and 6). The tests cover the risky cases on both sides, not just the happy path. I found no high-severity issues. Remaining notes: the existing margin check can still block a reducing order (out of scope for this order, but it conflicts with AGENTS rule 5), bad limit values like NaN or negatives aren't handled, and the human change to the invariants file still needs CODEOWNERS approval.",
+    "verdict": "approve",
+    "findings": [
+      {
+        "severity": "medium",
+        "file": "orders/validation.py",
+        "issue": "This was not introduced by this diff, but it affects the intent. The existing INSUFFICIENT_MARGIN check (line 56) runs before the position-limit check and applies to every order, including ones that reduce or close a position. So a trader can still be blocked from closing, which conflicts with AGENTS.md rule 5 and the intent \"Reducing or closing a position is always allowed\". Invariant 2 only checks that the reason is not POSITION_LIMIT, so it doesn't catch this.",
+        "failing_input": "Account('A1', free_margin=D('10'), {'XAUUSD': D('5')}); Order('XAUUSD', SELL, D('5.00'), D('2400.00')) -> rejected INSUFFICIENT_MARGIN, even though it closes the position",
+        "suggestion": "Raise this with the human as a separate work order (only check margin on orders that increase exposure). Keep it out of WO-001 so the change stays small."
+      },
+      {
+        "severity": "low",
+        "file": "orders/validation.py",
+        "issue": "Limit values are not validated. A Decimal('NaN') limit makes `abs(new) > limit` raise decimal.InvalidOperation, so validate_order throws instead of returning a Reason. A negative limit quietly blocks every increase. A limit of 0 (flat-only) has no test.",
+        "failing_input": "position_limits={'XAUUSD': Decimal('NaN')}, Order('XAUUSD', BUY, D('1.00'), D('2400.00')) -> InvalidOperation exception",
+        "suggestion": "Either check limits when the Account is built (finite and >= 0), or document that callers must do it. Add a test for limit=0."
+      },
+      {
+        "severity": "low",
+        "file": "tests/test_validation.py",
+        "issue": "The `_lim` helper always puts the position on 'XAUUSD' and ignores `sym`. No test has an existing position in a different symbol from the order's, or a limit on another symbol while there's an open position. The logic is right, but the coverage is thinner than it looks.",
+        "suggestion": "Add a case where only another symbol has a position or limit, e.g. a US500 position of 100 plus an XAUUSD BUY at the XAUUSD limit, and check it's accepted."
+      },
+      {
+        "severity": "low",
+        "file": "invariants/test_position_limit_invariants.py",
+        "issue": "This protected file was added, and then changed again in d549085 ('flip rule invariant') after gate 1 failed. The gate says a human made the change, but it still needs CODEOWNERS approval. Changing an invariant after a failed gate is the pattern that most needs a human to confirm it was a deliberate business decision and not a weaker check.",
+        "suggestion": "Have a CODEOWNER confirm the flip invariants (5 and 6) are the intended rule before merging."
+      }
+    ]
+  },
+  "reviewer_model": "opus",
+  "cost_usd": 0.1287455,
+  "ts": "2026-11-24T06:12:03+00:00",
+  "summary_md": "Gate on `142acb1340`: **PASS**\n\n- [PASS] **protected paths**: changed only by humans: invariants/test_position_limit_invariants.py (vraj@example.com) \u2014 needs CODEOWNERS approval\n- [PASS] **test config tamper**: no agent changes to conftest/pytest config\n- [PASS] **diff size**: 195 changed lines in 4 files (limit 250)\n- [PASS] **secret scan**: no secrets in added lines\n- [PASS] **no float on money**: no float in orders/\n- [PASS] **SAST (bandit)**: 2 files, 0 low-severity notes\n- [PASS] **invariants (human-owned)**: 9 passed in 3.04s\n- [PASS] **unit tests**: 18 passed in 0.01s\n- [PASS] **independent reviewer agent**: approve: 0 blocking finding(s), 4 total\n\nReviewer (opus) verdict: **approve** \u2014 The position-limit logic in orders/validation.py:29-43 is correct for every case I traced: BUY and SELL, long and short, flat, exact boundaries, accounts already over their limit, flips across zero, a missing limit and a missing position. It uses Decimal only, does not change its inputs, and every rejection returns the single Reason.POSITION_LIMIT. Reducing or closing an over-limit position is never blocked by the limit check. A flip is checked only on the size of the new opposite position, which matches the human's flip rule (invariants 5 and 6). The tests cover the risky cases on both sides, not just the happy path. I found no high-severity issues. Remaining notes: the existing margin check can still block a reducing order (out of scope for this order, but it conflicts with AGENTS rule 5), bad limit values like NaN or negatives aren't handled, and the human change to the invariants file still needs CODEOWNERS approval.\n  - (medium) orders/validation.py: This was not introduced by this diff, but it affects the intent. The existing INSUFFICIENT_MARGIN check (line 56) runs before the position-limit check and applies to every order, including ones that reduce or close a position. So a trader can still be blocked from closing, which conflicts with AGENTS.md rule 5 and the intent \"Reducing or closing a position is always allowed\". Invariant 2 only checks that the reason is not POSITION_LIMIT, so it doesn't catch this. Failing input: Account('A1', free_margin=D('10'), {'XAUUSD': D('5')}); Order('XAUUSD', SELL, D('5.00'), D('2400.00')) -> rejected INSUFFICIENT_MARGIN, even though it closes the position\n  - (low) orders/validation.py: Limit values are not validated. A Decimal('NaN') limit makes `abs(new) > limit` raise decimal.InvalidOperation, so validate_order throws instead of returning a Reason. A negative limit quietly blocks every increase. A limit of 0 (flat-only) has no test. Failing input: position_limits={'XAUUSD': Decimal('NaN')}, Order('XAUUSD', BUY, D('1.00'), D('2400.00')) -> InvalidOperation exception\n  - (low) tests/test_validation.py: The `_lim` helper always puts the position on 'XAUUSD' and ignores `sym`. No test has an existing position in a different symbol from the order's, or a limit on another symbol while there's an open position. The logic is right, but the coverage is thinner than it looks.\n  - (low) invariants/test_position_limit_invariants.py: This protected file was added, and then changed again in d549085 ('flip rule invariant') after gate 1 failed. The gate says a human made the change, but it still needs CODEOWNERS approval. Changing an invariant after a failed gate is the pattern that most needs a human to confirm it was a deliberate business decision and not a weaker check.",
+  "number": 2
+}

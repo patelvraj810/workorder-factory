@@ -1,0 +1,2 @@
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/validation.py", "allowed": "True"}
+{"tool": "StructuredOutput", "target": "final structured answer", "allowed": "True"}

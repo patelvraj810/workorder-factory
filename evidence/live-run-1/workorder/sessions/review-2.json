@@ -1,0 +1,57 @@
+{
+  "role": "reviewer",
+  "model": "opus",
+  "harness": "wo-factory/0.2 + claude-agent-sdk/0.2.188",
+  "session_id": "f466690c-e743-41b9-b437-9bdbc24a1ee4",
+  "started_seq": 18,
+  "cost_usd": 0.1287455,
+  "tokens": {
+    "in": 18161,
+    "out": 2459
+  },
+  "tool_calls": [
+    {
+      "tool": "Read",
+      "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/validation.py",
+      "allowed": "True"
+    },
+    {
+      "tool": "StructuredOutput",
+      "target": "final structured answer",
+      "allowed": "True"
+    }
+  ],
+  "denied": [],
+  "output": {
+    "summary": "The position-limit logic in orders/validation.py:29-43 is correct for every case I traced: BUY and SELL, long and short, flat, exact boundaries, accounts already over their limit, flips across zero, a missing limit and a missing position. It uses Decimal only, does not change its inputs, and every rejection returns the single Reason.POSITION_LIMIT. Reducing or closing an over-limit position is never blocked by the limit check. A flip is checked only on the size of the new opposite position, which matches the human's flip rule (invariants 5 and 6). The tests cover the risky cases on both sides, not just the happy path. I found no high-severity issues. Remaining notes: the existing margin check can still block a reducing order (out of scope for this order, but it conflicts with AGENTS rule 5), bad limit values like NaN or negatives aren't handled, and the human change to the invariants file still needs CODEOWNERS approval.",
+    "verdict": "approve",
+    "findings": [
+      {
+        "severity": "medium",
+        "file": "orders/validation.py",
+        "issue": "This was not introduced by this diff, but it affects the intent. The existing INSUFFICIENT_MARGIN check (line 56) runs before the position-limit check and applies to every order, including ones that reduce or close a position. So a trader can still be blocked from closing, which conflicts with AGENTS.md rule 5 and the intent \"Reducing or closing a position is always allowed\". Invariant 2 only checks that the reason is not POSITION_LIMIT, so it doesn't catch this.",
+        "failing_input": "Account('A1', free_margin=D('10'), {'XAUUSD': D('5')}); Order('XAUUSD', SELL, D('5.00'), D('2400.00')) -> rejected INSUFFICIENT_MARGIN, even though it closes the position",
+        "suggestion": "Raise this with the human as a separate work order (only check margin on orders that increase exposure). Keep it out of WO-001 so the change stays small."
+      },
+      {
+        "severity": "low",
+        "file": "orders/validation.py",
+        "issue": "Limit values are not validated. A Decimal('NaN') limit makes `abs(new) > limit` raise decimal.InvalidOperation, so validate_order throws instead of returning a Reason. A negative limit quietly blocks every increase. A limit of 0 (flat-only) has no test.",
+        "failing_input": "position_limits={'XAUUSD': Decimal('NaN')}, Order('XAUUSD', BUY, D('1.00'), D('2400.00')) -> InvalidOperation exception",
+        "suggestion": "Either check limits when the Account is built (finite and >= 0), or document that callers must do it. Add a test for limit=0."
+      },
+      {
+        "severity": "low",
+        "file": "tests/test_validation.py",
+        "issue": "The `_lim` helper always puts the position on 'XAUUSD' and ignores `sym`. No test has an existing position in a different symbol from the order's, or a limit on another symbol while there's an open position. The logic is right, but the coverage is thinner than it looks.",
+        "suggestion": "Add a case where only another symbol has a position or limit, e.g. a US500 position of 100 plus an XAUUSD BUY at the XAUUSD limit, and check it's accepted."
+      },
+      {
+        "severity": "low",
+        "file": "invariants/test_position_limit_invariants.py",
+        "issue": "This protected file was added, and then changed again in d549085 ('flip rule invariant') after gate 1 failed. The gate says a human made the change, but it still needs CODEOWNERS approval. Changing an invariant after a failed gate is the pattern that most needs a human to confirm it was a deliberate business decision and not a weaker check.",
+        "suggestion": "Have a CODEOWNER confirm the flip invariants (5 and 6) are the intended rule before merging."
+      }
+    ]
+  }
+}

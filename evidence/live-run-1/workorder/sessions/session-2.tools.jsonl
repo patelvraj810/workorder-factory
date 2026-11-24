@@ -1,0 +1,13 @@
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/validation.py", "allowed": "True"}
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/models.py", "allowed": "True"}
+{"tool": "Bash", "target": "head -30 tests/test_validation.py", "allowed": "False", "reason": "command not on the allow-list: 'head -30 tests/test_validation.py'"}
+{"tool": "Edit", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/validation.py", "allowed": "True"}
+{"tool": "Edit", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/orders/validation.py", "allowed": "True"}
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/tests/test_validation.py", "allowed": "True"}
+{"tool": "Edit", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/tests/test_validation.py", "allowed": "True"}
+{"tool": "Bash", "target": "python -m pytest -q tests/", "allowed": "True"}
+{"tool": "Bash", "target": "python -m pytest -q invariants/", "allowed": "True"}
+{"tool": "Read", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/tests/test_validation.py", "allowed": "True"}
+{"tool": "Edit", "target": "/private/tmp/wo-live/.factory/worktrees/WO-001/tests/test_validation.py", "allowed": "True"}
+{"tool": "Bash", "target": "python -m pytest -q tests/", "allowed": "True"}
+{"tool": "StructuredOutput", "target": "final structured answer", "allowed": "True"}

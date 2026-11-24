@@ -1,0 +1,118 @@
+81c9c51 priya <priya@example.com>
+Merge WO-001: Per-symbol position limits
+
+Work-Order: WO-001
+Accountable-Owner: vraj
+Approved-By: priya
+Gate: 2 pass on 142acb13407074880e077047bc3082a812b7e607
+Provenance: complete, 8 agent steps (FINOS MI-23)
+Ledger-Entry: 6b5f79502c1acda3b0403e8e1536ed3d1f067864cb7b17e335de8ca8c4108549
+
+2b39071 wo-factory <wo-factory@factory.invalid>
+WO-001: PR description
+
+Work-Order: WO-001
+
+c3877fd wo-factory <wo-factory@factory.invalid>
+WO-001: gate 2 PASS
+
+Work-Order: WO-001
+Gate-Code-Sha: 142acb13407074880e077047bc3082a812b7e607
+Gate-Result: pass
+
+142acb1 wo-agent <wo-agent@factory.invalid>
+WO-001 FIX: Fixed the reviewer's high finding in orders/validation.py. A
+
+Work-Order: WO-001
+Accountable-Owner: vraj
+Agent-Role: implementer
+Agent-Model: sonnet
+Agent-Session: df0aaed8-bf56-4b23-bc74-e9a1862035a9
+Feature: FIX
+Ledger-Prev: 8ea586e949bcd7d8
+
+d549085 vraj <vraj@example.com>
+WO-001: flip rule invariant (business rule decided by vraj)
+
+Work-Order: WO-001
+
+Change-Type: human-invariant
+
+0e06a8f wo-factory <wo-factory@factory.invalid>
+WO-001: gate 1 FAIL
+
+Work-Order: WO-001
+Gate-Code-Sha: 7e5e78f009b4cff7069aa3dd67b3e166450921ea
+Gate-Result: fail
+
+7e5e78f wo-agent <wo-agent@factory.invalid>
+WO-001 F2: Added _breaches_position_limit(order, account) in orders/val
+
+Work-Order: WO-001
+Accountable-Owner: vraj
+Agent-Role: implementer
+Agent-Model: sonnet
+Agent-Session: 0fdbfe1e-2340-4446-8033-afbdc1ed2aff
+Feature: F2
+Ledger-Prev: 468ee5efc42569db
+
+549ea4a wo-agent <wo-agent@factory.invalid>
+WO-001 F1: Added Account.position_limits (dict[str, Decimal], default_f
+
+Work-Order: WO-001
+Accountable-Owner: vraj
+Agent-Role: implementer
+Agent-Model: sonnet
+Agent-Session: c7e7f17c-d236-432b-9a89-f70d231f99d4
+Feature: F1
+Ledger-Prev: 8fda13bca3254c50
+
+27dbee3 wo-agent <wo-agent@factory.invalid>
+WO-001: plan (2 features)
+
+Work-Order: WO-001
+Accountable-Owner: vraj
+Agent-Role: planner
+Agent-Model: sonnet
+Agent-Session: 160ded75-d8bd-48a5-af0c-eddcd02db30e
+Ledger-Prev: 275a5160d8935c8a
+
+3efbea3 wo-factory <wo-factory@factory.invalid>
+WO-001: progress note after recovery
+
+Work-Order: WO-001
+Change-Type: recovery
+
+3ca0e4a wo-factory <wo-factory@factory.invalid>
+WO-001: recovered from 0 abandoned / 1 failed session(s)
+
+Work-Order: WO-001
+Change-Type: recovery
+
+c1f4ea4 wo-factory <wo-factory@factory.invalid>
+WO-001: progress note after recovery
+
+Work-Order: WO-001
+Change-Type: recovery
+
+578773e wo-factory <wo-factory@factory.invalid>
+WO-001: recovered from 0 abandoned / 1 failed session(s)
+
+Work-Order: WO-001
+Change-Type: recovery
+
+885fbd8 lead <lead@example.com>
+init
+
+4fa8c1d vraj <vraj@example.com>
+WO-001: open work order
+
+Work-Order: WO-001
+Change-Type: work-order
+
+f367747 vraj <vraj@example.com>
+WO-001: add human-owned invariants
+
+Work-Order: WO-001
+Change-Type: human-invariant
+
