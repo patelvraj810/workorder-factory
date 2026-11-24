@@ -85,7 +85,7 @@ ROLE_TOOLS = {
 
 ROLE_MODEL_ENV = {"planner": "WO_PLANNER_MODEL", "implementer": "WO_IMPLEMENTER_MODEL", "reviewer": "WO_REVIEWER_MODEL"}
 # The reviewer defaults to a different model from the implementer on purpose: less shared blind spots.
-ROLE_MODEL_DEFAULT = {"planner": "opus", "implementer": "sonnet", "reviewer": "opus"}
+ROLE_MODEL_DEFAULT = {"planner": "sonnet", "implementer": "sonnet", "reviewer": "opus"}
 
 
 def model_for(role: str) -> str:
@@ -179,6 +179,7 @@ class ClaudeBackend:
 
         tool_log: list[dict[str, str]] = []
         denials: list[dict[str, str]] = []
+        stderr_tail: list[str] = []
         tools = ROLE_TOOLS[role]
 
         async def pre_tool(input_data: dict, tool_use_id: str | None, context: Any) -> dict:
@@ -203,7 +204,10 @@ class ClaudeBackend:
             tools=tools,
             allowed_tools=tools,
             permission_mode="dontAsk",
-            setting_sources=["project"],  # loads the repo's CLAUDE.md -> AGENTS.md
+            setting_sources=["project"],  # loads the repo's CLAUDE.md -> AGENTS.md, ignores personal settings
+            mcp_servers={},
+            strict_mcp_config=True,  # never load the engineer's personal MCP servers: only this role's tools
+            stderr=lambda line: (stderr_tail.append(line), stderr_tail.__delitem__(slice(0, -40))),
             system_prompt={"type": "preset", "preset": "claude_code"},
             hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre_tool])]},
             output_format={"type": "json_schema", "schema": schema},
@@ -211,9 +215,13 @@ class ClaudeBackend:
             max_turns=60,
         )
         result: ResultMessage | None = None
-        async for msg in query(prompt=prompt, options=options):
-            if isinstance(msg, ResultMessage):
-                result = msg
+        try:
+            async for msg in query(prompt=prompt, options=options):
+                if isinstance(msg, ResultMessage):
+                    result = msg
+        except Exception as e:
+            tail = "\n".join(stderr_tail[-20:])
+            raise RuntimeError(f"{role} agent failed: {e}" + (f"\n--- agent stderr (last lines) ---\n{tail}" if tail else "")) from e
         if result is None or result.is_error or not result.structured_output:
             detail = (result.result or result.subtype) if result else "no result"
             raise RuntimeError(f"{role} agent did not return a valid result: {detail}")
