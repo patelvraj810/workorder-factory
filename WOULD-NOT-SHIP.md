@@ -38,3 +38,10 @@ business, each of these would cost more trust than it saves time.
    agents behave. I label them as scripted everywhere and re-record live runs before relying on them.
 
 10. **Real code or data from any employer.** Everything here is synthetic.
+
+11. **An AI reviewer with the last word.** The reviewer agent is an opinion. A person can overrule a
+    finding, but only with a written reason that is kept in the audit record, and never a failed test,
+    a broken rule, a protected-file change or a secret. Those are facts, not opinions.
+
+12. **Integrations that can approve.** Jira, Slack and the rest may start work and tell people things.
+    Approval stays with an authenticated person in the Git host or the dashboard.

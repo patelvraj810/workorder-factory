@@ -30,7 +30,7 @@ SECRET_PATTERNS = {
     "anthropic_key": re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"),
 }
 TEST_CONFIG_FILES = {"conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini"}
-SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3}
+SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3, "off": 99}
 
 
 @dataclass

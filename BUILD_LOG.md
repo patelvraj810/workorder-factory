@@ -25,7 +25,9 @@ what I still do before submitting.
 | 01:19–01:45 | Round 4: scripted demo updated to the flip rule (+ `flip_loophole` eval), WO-002 kit for the margin bug the agents found, this log, slide draft | Agent, from my list |
 | after the live run | Read `factory/agents.py` (guard) and `factory/gate.py` line by line | Me |
 | ~01:50–02:20 | Round 5, "use it myself": I decided to make it a public repo that a non-technical person can use by talking to Claude. Chose 3 items from a list: `wo init` + Claude skill + `.mcp.json`; approval guard; public-repo prep. Agent built them, plus configurable gate commands so it works on non-Python projects | Me decided, agent built |
-| **[Vraj]** | Rehearse, record the demo, final edit of the slides, push to GitHub | Me |
+| after the timebox | Used the factory on my own practice project (a tip calculator) from Claude Code. It caught real money bugs in the AI's code, and showed me bugs in the factory itself (#19–24 below), each fixed | Me + Claude Code + the factory |
+| after the timebox | Dashboard `wo ui`: see every work order live and make the human-only decisions with buttons; project rule presets; accept a reviewer finding with a written reason | Me decided, agent built |
+| **[Vraj]** | Rehearse, record the demo, final edit of the slides | Me |
 
 ## What I delegated
 - All code in `factory/`, `sample_repo/`, `evals/`, `tests/`, `demo.sh`.
@@ -52,6 +54,16 @@ what I still do before submitting.
 - **Round 5 decisions:** make it public; make it usable without a terminal (you talk to Claude in VS Code
   or the desktop app); pick 3 of the proposed items and say no to the rest; keep **one repo, not two**,
   so one `git clone` runs the whole story (factory + the sample project it works on).
+- **Using it myself changed the design.** The terminal was too hard for a non-technical person, and even
+  for me it hid what was going on. I decided against a chat UI (Claude already is one) and for a
+  **dashboard**: people talk to their AI, and see and decide in one page.
+- **A human must be able to overrule the AI reviewer**, with a written reason on record. Before this, the
+  reviewer agent had the last word, which is backwards. Only its opinions can be overruled: failed tests
+  and broken rules never can.
+- **Strictness per project:** practice / normal / money-critical presets. A tip calculator and order
+  handling should not have the same rules.
+- **Integrations stay design-only for now** (Jira, Slack, Git host, SSO, incident tools; DESIGN.md §8b),
+  with one rule: they can start work and inform people, never approve.
 
 ## What I wrote by hand
 - Almost no code. My work was direction, decisions, review and running it for real.
@@ -101,6 +113,10 @@ what I still do before submitting.
 | **Total build time** | **about 3 h 55 min, within the 4-hour timebox** |
 
 
+| Extra, after the timebox | Time |
+|---|---|
+| Dashboard (`wo ui`), presets, accepting reviewer findings | ~30 min |
+
 **How I used the time:** I spent it on three things, not on more features.
 
 1. **Most important: anyone can use it, not only engineers.** I wanted a person who can't code to use
@@ -118,7 +134,8 @@ what I still do before submitting.
    replays never could (budget cap, blocked answer tool, flip loophole).
 
 **What I cut:** real container isolation, model gateway, parallel workers, GitHub check integration,
-a hosted paved road for non-engineers (design only; `wo init` + the Claude skill is the local first step).
+integrations with Jira / Slack / SSO, a hosted paved road for non-engineers (design only; `wo init`, the
+Claude skill and the local dashboard are the first step).
 
 ## Tools used
 - Claude (agent session with shell + file tools) for planning, code, tests, docs.

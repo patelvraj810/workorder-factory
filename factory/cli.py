@@ -336,6 +336,8 @@ def derive_status(ctx: Ctx, wo_id: str) -> str:
             status = "in progress"
         elif ev == "gate.result":
             status = "gate passed" if e["data"]["passed"] else "gate FAILED"
+        elif ev == "gate.accepted":
+            status = "gate passed"
         elif ev == "workorder.handed_back":
             status = "handed back"
         elif ev == "approval.granted":
@@ -451,6 +453,7 @@ def cmd_init(args) -> None:
     toml = (TEMPLATES / "factory.toml").read_text() \
         .replace("__ALLOWED_BASH__", json.dumps(st["bash"])) \
         .replace("__UNIT_TESTS__", st["unit"]).replace("__INVARIANTS__", st["inv"])
+    toml = set_policy_values(toml, {**PRESETS[args.preset], "preset": args.preset})
     _write_if_missing(repo / "factory.toml", toml, made, skipped, repo)
     agents = (TEMPLATES / "AGENTS.md").read_text().replace("__PROJECT__", repo.name) \
         .replace("__UNIT_TESTS_DOC__", (st["unit"] + "   # unit tests (you may add tests)") if st["unit"]
@@ -493,10 +496,10 @@ def cmd_init(args) -> None:
                    "-m", "Set up the work-order factory\n\nChange-Type: factory-setup", "--", *paths)
         committed = gitops.head(repo)
     Ledger(repo / ".factory" / "ledger.jsonl").append(
-        "factory.initialized", None, user, stack=stack, created=made, kept=skipped,
+        "factory.initialized", None, user, stack=stack, preset=args.preset, created=made, kept=skipped,
         commit=committed or None, channel=os.environ.get("WO_CHANNEL", "cli"))
 
-    console.print(f"[bold green]Factory set up[/] in {repo} (project type: {stack}).")
+    console.print(f"[bold green]Factory set up[/] in {repo} (project type: {stack}, rules: {args.preset}).")
     for m in made:
         console.print(f"  [green]+[/] {m}")
     for k in skipped:
@@ -546,6 +549,200 @@ def cmd_new(args) -> None:
                       invariants={p: sha256_file(wt / p) for p in inv_paths})
     console.print(f"[bold green]Opened {wo_id}[/] on branch [cyan]{branch}[/] (sandbox: {wt.relative_to(ctx.repo)})")
     console.print(f"Next: [bold]wo plan {wo_id}[/]")
+
+
+# --- Project rules: presets, plain-English descriptions, safe edits ----------------------------------------
+
+PRESETS = {
+    "practice": {"blocking_severity": "off", "max_gate_failures": 5, "max_diff_lines": 400,
+                 "require_independent_approver": False},
+    "normal": {"blocking_severity": "high", "max_gate_failures": 3, "max_diff_lines": 250,
+               "require_independent_approver": True},
+    "money-critical": {"blocking_severity": "medium", "max_gate_failures": 3, "max_diff_lines": 200,
+                       "require_independent_approver": True},
+}
+PRESET_INFO = {
+    "practice": "Learning or side projects. The reviewer agent advises but never blocks. You can approve your own work.",
+    "normal": "Most team projects. High-severity reviewer findings block. A different person approves.",
+    "money-critical": "Code that moves money or orders. Medium findings block too, smaller changes, a different person approves.",
+}
+# key -> (toml section, short label, plain-English meaning, kind, choices). Kind "ro" = shown, not editable here.
+RULE_INFO = {
+    "blocking_severity": ("review", "Reviewer blocks on", "How serious a finding by the reviewer agent must be to stop the change. 'off' = it only advises.", "choice", ["low", "medium", "high", "off"]),
+    "require_independent_approver": ("review", "Someone else must approve", "The person who asked for a change can't approve it. Turn off only if you work alone.", "bool", None),
+    "max_gate_failures": ("policy", "Tries before hand-back", "After this many failed checks in a row, agents stop and the work comes back to you.", "int", None),
+    "max_diff_lines": ("policy", "Biggest agent change (lines)", "Agent changes bigger than this fail the check. Your own rule files don't count.", "int", None),
+    "max_session_budget_usd": ("policy", "Budget per agent session ($)", "One agent session stops when it reaches this cost.", "float", None),
+    "max_workorder_budget_usd": ("policy", "Budget per work order ($)", "The whole work order is handed back when it reaches this cost.", "float", None),
+    "unit_test_cmd": ("gate", "Unit test command", "How the factory runs this project's tests. Empty = WARN.", "str", None),
+    "invariant_cmd": ("gate", "Rules (invariants) command", "How the factory runs your must-never-break rules. Empty = WARN.", "str", None),
+    "protected_paths": ("policy", "Files agents can never change", "Change these in factory.toml with a reviewed commit.", "ro", None),
+    "allowed_bash": ("policy", "Commands agents may run", "One simple command at a time; chaining is always blocked.", "ro", None),
+    "money_paths": ("gate", "Money folders (no float)", "Any float added in these folders fails the check.", "ro", None),
+}
+TOML_KEY = {"unit_test_cmd": "unit_tests", "invariant_cmd": "invariants"}
+
+
+def _toml_value(v) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    return json.dumps(v)
+
+
+def set_policy_values(text: str, changes: dict) -> str:
+    """Edit key = value lines in factory.toml text, keeping comments and layout. Adds missing keys."""
+    sections = {"preset": "policy", **{k: v[0] for k, v in RULE_INFO.items()}}
+    for key, val in changes.items():
+        tkey, section = TOML_KEY.get(key, key), sections.get(key, "policy")
+        line = f"{tkey} = {_toml_value(val)}"
+        pat = re.compile(rf"^{re.escape(tkey)}\s*=.*$", re.M)
+        if pat.search(text):
+            text = pat.sub(lambda _m: line, text, count=1)
+        elif re.search(rf"^\[{section}\]\s*$", text, re.M):
+            text = re.sub(rf"^\[{section}\]\s*$", lambda m: m.group(0) + "\n" + line, text, count=1, flags=re.M)
+        else:
+            text = text.rstrip("\n") + f"\n\n[{section}]\n{line}\n"
+    return text
+
+
+def _parse_rule_value(key: str, raw: str):
+    kind, choices = RULE_INFO[key][3], RULE_INFO[key][4]
+    if kind == "ro":
+        raise SystemExit(f"'{key}' can't be changed here. Edit factory.toml in a reviewed commit.")
+    if kind == "bool":
+        if raw.lower() not in ("true", "false", "on", "off", "yes", "no"):
+            raise SystemExit(f"'{key}' must be true or false")
+        return raw.lower() in ("true", "on", "yes")
+    if kind == "int":
+        v = int(raw)
+        if v < 1:
+            raise SystemExit(f"'{key}' must be at least 1")
+        return v
+    if kind == "float":
+        v = float(raw)
+        if v <= 0:
+            raise SystemExit(f"'{key}' must be more than 0")
+        return v
+    if kind == "choice" and raw not in choices:
+        raise SystemExit(f"'{key}' must be one of: {', '.join(choices)}")
+    return raw
+
+
+def rules_view(policy) -> list[dict]:
+    out = []
+    for key, (section, label, meaning, kind, choices) in RULE_INFO.items():
+        out.append({"key": key, "label": label, "meaning": meaning, "kind": kind, "choices": choices,
+                    "value": getattr(policy, key)})
+    return out
+
+
+def cmd_rules(args) -> None:
+    """Show this project's rules in plain English, or change them (humans only, committed to git)."""
+    ctx = Ctx(args)
+    if not args.set and not args.preset:
+        console.print(f"[bold]Project rules[/] for {ctx.repo.name}"
+                      + (f" — preset: [bold]{ctx.policy.preset}[/]" if ctx.policy.preset else ""))
+        t = Table(show_lines=False)
+        t.add_column("Rule"); t.add_column("Now"); t.add_column("What it means", overflow="fold")
+        for r in rules_view(ctx.policy):
+            val = r["value"]
+            shown = ", ".join(val) if isinstance(val, list) else ("" if val is None else str(val))
+            t.add_row(r["label"], shown or "(not set)", r["meaning"])
+        console.print(t)
+        console.print("[dim]Change: wo rules --set KEY=VALUE --by YOUR_NAME   or   wo rules --preset practice|normal|money-critical --by YOUR_NAME[/]")
+        return
+    if not args.by:
+        raise SystemExit("Say who is changing the rules: --by YOUR_NAME")
+    human_only(ctx, "change the project rules", args.by)
+    changes: dict = {}
+    if args.preset:
+        changes.update(PRESETS[args.preset]); changes["preset"] = args.preset
+    for item in args.set or []:
+        if "=" not in item:
+            raise SystemExit(f"Use KEY=VALUE, got {item!r}")
+        key, raw = item.split("=", 1)
+        if key not in RULE_INFO:
+            raise SystemExit(f"Unknown rule {key!r}. Known: {', '.join(k for k, v in RULE_INFO.items() if v[3] != 'ro')}")
+        changes[key] = _parse_rule_value(key, raw)
+    branch = gitops.git(ctx.repo, "rev-parse", "--abbrev-ref", "HEAD", check=False)
+    if branch != ctx.base_ref:
+        raise SystemExit(f"Switch this folder to '{ctx.base_ref}' first (it is on '{branch}'). Rules live on the base branch.")
+    if gitops.git(ctx.repo, "status", "--porcelain", "--", "factory.toml"):
+        raise SystemExit("factory.toml has unsaved edits. Commit or undo them first.")
+    path = ctx.repo / "factory.toml"
+    path.write_text(set_policy_values(path.read_text(), changes))
+    from factory.policy import load_policy
+    load_policy(ctx.repo)  # fails loudly if the edit broke the file
+    email = gitops.git(ctx.repo, "config", "user.email", check=False) or gitops.human_email(args.by)
+    summary = ", ".join(f"{k}={v}" for k, v in changes.items())
+    gitops.git(ctx.repo, "add", "--", "factory.toml")
+    gitops.git(ctx.repo, "-c", f"user.name={gitops.FACTORY_NAME}", "-c", f"user.email={gitops.FACTORY_EMAIL}",
+               "commit", "-q", "--author", f"{args.by} <{email}>",
+               "-m", f"Project rules: {summary}\n\nChange-Type: policy", "--", "factory.toml")
+    sha = gitops.head(ctx.repo)
+    ctx.ledger.append("policy.changed", None, args.by, changes=changes, commit=sha, channel=ctx.channel)
+    console.print(f"[bold green]Rules updated[/] by {args.by}: {summary} (commit {sha[:10]}). "
+                  "The next gate uses them.")
+
+
+def cmd_accept(args) -> None:
+    """A human overrules a reviewer-agent finding, with a written reason. Humans only.
+
+    Only the reviewer agent's opinions can be accepted. Failed tests, broken rules, protected files,
+    secrets or size never can: those are facts, not opinions.
+    """
+    ctx = Ctx(args)
+    store = ctx.store(args.wo)
+    wo = store.load_wo()
+    wt = ctx.worktree(wo.id)
+    human_only(ctx, "accept a reviewer finding", args.by, wo.id)
+    if len(args.reason.strip()) < 10:
+        raise SystemExit("Write a real reason (at least 10 characters). It goes in the audit record.")
+    gate = store.last_gate()
+    if not gate:
+        raise SystemExit(f"{wo.id} has no gate yet.")
+    findings = (gate.get("review") or {}).get("findings", [])
+    if not 1 <= args.finding <= len(findings):
+        raise SystemExit(f"Gate {gate['number']} has {len(findings)} reviewer finding(s). Pick 1 to {len(findings)}.")
+    other_fails = [c["name"] for c in gate["checks"] if not c["passed"] and c.get("blocking", True)
+                   and c["name"] != "independent reviewer agent"]
+    if other_fails:
+        raise SystemExit(f"Can't accept: these checks failed and can't be overruled: {', '.join(other_fails)}.")
+    accepted = gate.setdefault("accepted", [])
+    if any(a["finding"] == args.finding for a in accepted):
+        raise SystemExit(f"Finding {args.finding} is already accepted.")
+    f = findings[args.finding - 1]
+    accepted.append({"finding": args.finding, "severity": f.get("severity"), "issue": f.get("issue", "")[:300],
+                     "by": args.by, "reason": args.reason.strip(),
+                     "at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+    from factory.gate import SEVERITY_RANK
+    threshold = SEVERITY_RANK[ctx.policy.blocking_severity]
+    done = {a["finding"] for a in accepted}
+    still = [i + 1 for i, x in enumerate(findings)
+             if SEVERITY_RANK.get(x.get("severity"), 0) >= threshold and (i + 1) not in done]
+    for c in gate["checks"]:
+        if c["name"] == "independent reviewer agent":
+            c["passed"] = not still
+            c["detail"] = (f"{len(still)} blocking finding(s) left; {len(done)} accepted by a human"
+                           if still else f"all blocking findings accepted by a human ({len(done)})")
+    gate["passed"] = all(c["passed"] or not c.get("blocking", True) for c in gate["checks"])
+    (store.dir / "gates" / f"gate-{gate['number']}.json").write_text(json.dumps(gate, indent=2) + "\n")
+    rel = f".factory/{wo.id}/gates/gate-{gate['number']}.json"
+    gitops.git(wt, "add", "--", rel)
+    gitops.git(wt, "-c", f"user.name={gitops.FACTORY_NAME}", "-c", f"user.email={gitops.FACTORY_EMAIL}",
+               "commit", "-q", "--author", f"{args.by} <{gitops.human_email(args.by)}>",
+               "-m", f"{wo.id}: {args.by} accepted reviewer finding {args.finding} of gate {gate['number']}\n\n"
+                     f"Reason: {args.reason.strip()}\nWork-Order: {wo.id}\nChange-Type: finding-accepted", "--", rel)
+    ctx.ledger.append("finding.accepted", wo.id, args.by, gate=gate["number"], finding=args.finding,
+                      severity=f.get("severity"), reason=args.reason.strip(), commit=gitops.head(wt), channel=ctx.channel)
+    if gate["passed"]:
+        ctx.ledger.append("gate.accepted", wo.id, args.by, number=gate["number"], code_sha=gate["code_sha"])
+        console.print(f"[bold green]Accepted[/]. Gate {gate['number']} now passes with your reason on record. "
+                      f"Next: [bold]wo pr {wo.id}[/]")
+    else:
+        console.print(f"Accepted finding {args.finding}. Still blocking: {', '.join(map(str, still))}.")
 
 
 def cmd_rule(args) -> None:
@@ -1133,11 +1330,23 @@ def main(argv: list[str] | None = None) -> None:
     s = sub.add_parser("init", help="set up a repository for the factory (safe to re-run)"); s.set_defaults(fn=cmd_init)
     s.add_argument("--user", help="your name (default: git config user.name)")
     s.add_argument("--stack", choices=sorted(STACKS), help="project type (default: detected)")
+    s.add_argument("--preset", choices=sorted(PRESETS), default="normal",
+                   help="how strict: practice | normal | money-critical (default: normal)")
     s.add_argument("--no-commit", action="store_true", help="write the files but do not commit them")
     s = sub.add_parser("new", help="open a work order"); s.set_defaults(fn=cmd_new)
     s.add_argument("title"); s.add_argument("--intent", required=True); s.add_argument("--by", required=True)
     s.add_argument("--invariant", action="append", help="human-written invariant test file (repeatable)")
     s.add_argument("--base", help="branch to start from (default: main, else master, else current)")
+    s = sub.add_parser("rules", help="show or change this project's rules in plain English")
+    s.set_defaults(fn=cmd_rules); s.add_argument("--set", action="append", metavar="KEY=VALUE")
+    s.add_argument("--preset", choices=sorted(PRESETS)); s.add_argument("--by")
+    s = sub.add_parser("accept", help="overrule a reviewer-agent finding with a written reason (humans only)")
+    s.set_defaults(fn=cmd_accept); s.add_argument("wo"); s.add_argument("--finding", type=int, required=True)
+    s.add_argument("--reason", required=True); s.add_argument("--by", required=True)
+    s = sub.add_parser("ui", help="open the dashboard in your browser")
+    s.set_defaults(fn=lambda a: __import__("factory.ui", fromlist=["serve"]).serve(a))
+    s.add_argument("--port", type=int, default=8765); s.add_argument("--user", help="your name (default: git user.name)")
+    s.add_argument("--no-open", action="store_true", help="don't open a browser")
     s = sub.add_parser("rule", help="add a human-owned rule to an open work order (humans only)")
     s.set_defaults(fn=cmd_rule); s.add_argument("wo"); s.add_argument("file"); s.add_argument("--by", required=True)
     s = sub.add_parser("plan", help="planner agent splits the work"); s.set_defaults(fn=cmd_plan); s.add_argument("wo"); agent_opts(s)

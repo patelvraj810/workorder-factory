@@ -1,8 +1,10 @@
 # Using the factory on your own project (plain English)
 
-You don't need to know the terminal to use the factory day to day. You talk to Claude, and
-Claude drives the factory for you. You only need a terminal (or GitHub) for **two things that
-must stay human**: approving a change and adding a rule that must never break.
+You don't need to know the terminal to use the factory day to day.
+
+- **Talk:** you ask Claude in plain English, and Claude drives the factory for you.
+- **See and decide:** the dashboard (`wo ui`) shows everything that is happening, and has buttons for
+  the steps that must stay human: approve, add a rule, accept a reviewer finding with a reason, stop.
 
 ---
 
@@ -23,8 +25,18 @@ Claude Code panel, and paste:
 git clone https://github.com/patelvraj810/workorder-factory ~/workorder-factory
 cd ~/workorder-factory && python3 -m venv .venv && . .venv/bin/activate && pip install -e .
 cd /path/to/your/project
-wo init --user YOUR_NAME
+wo init --user YOUR_NAME --preset normal
 ```
+
+**Pick how strict it should be** with `--preset`:
+
+| Preset | For | The reviewer agent… | Who approves |
+|---|---|---|---|
+| `practice` | Learning, side projects | advises, never blocks | you can approve your own work |
+| `normal` (default) | Most team projects | blocks on high findings | a different person |
+| `money-critical` | Code that moves money or orders | blocks on medium findings too, smaller changes | a different person |
+
+You can switch later on the dashboard's **Project rules** tab.
 
 `wo init` only creates files that are missing. It never overwrites your own files and never
 commits your other work. It adds:
@@ -50,7 +62,17 @@ money_paths = ["src/billing/"]   # any float added here fails the gate
 
 ---
 
-## 2. Day to day: just ask Claude
+## 2. Day to day: ask Claude, watch the dashboard
+
+**Open the dashboard once per day** (it stays open in a browser tab):
+```bash
+cd /path/to/your/project
+~/workorder-factory/.venv/bin/wo ui
+```
+It opens in your browser and shows: every work order, what happened in order (in plain English),
+each check (PASS / FAIL / WARN and what it means), what the reviewer agent said, the cost so far,
+and what the AI is doing right now (each file it writes, each command it runs, and anything blocked).
+Only your computer can open it. If an AI starts it, it opens read-only.
 
 ### In VS Code (Claude Code extension), the best option
 
@@ -94,17 +116,19 @@ or the desktop app.
 
 ---
 
-## 3. The two things that stay with you
+## 3. What stays with you (never the AI)
 
-| Action | Why Claude can't do it | How you do it |
-|---|---|---|
-| **Approve / merge** | The person who asked for the change, and the AI that made it, must not approve it. | On GitHub, approve the pull request. Or in your own terminal: `wo approve WO-001 --by REVIEWER_NAME` (a different person from the requester). |
-| **Add a rule (invariant)** | The AI must never write the tests it is judged by. | Ask Claude to **draft** the rule. It saves it in `.factory/proposals/`. Read it, then in your own terminal: for an **open** work order `wo rule WO-001 .factory/proposals/test_x.py --by YOUR_NAME`; for a **new** one `wo new "Title" --intent "..." --by YOUR_NAME --invariant .factory/proposals/test_x.py` |
-| **Turn the kill switch off** | Anyone (or any agent) can stop. Only a human can start again. | `wo resume --by YOUR_NAME` in your own terminal. |
+| Action | Why Claude can't do it | Dashboard | Or in a terminal |
+|---|---|---|---|
+| **Approve / merge** | The person who asked for the change, and the AI that made it, must not approve it | **Approve and merge** | `wo approve WO-001 --by NAME --merge`, or approve the PR on GitHub |
+| **Add a rule (invariant)** | The AI must never write the tests it is judged by | Ask Claude to **draft** it (saved in `.factory/proposals/`), read it, press **Add to WO-001** | `wo rule WO-001 .factory/proposals/test_x.py --by NAME` |
+| **Overrule the reviewer agent** | The AI reviewer is an opinion, so a person decides. Failed tests and broken rules can never be overruled | Write why it's OK, press **Accept with this reason** (kept in the audit record) | `wo accept WO-001 --finding 1 --reason "..." --by NAME` |
+| **Change the project rules** | Agents must never loosen their own limits | **Project rules** tab: a preset, or each setting in plain words | `wo rules --set KEY=VALUE --by NAME` |
+| **Restart after a stop** | Anyone (or any agent) can stop. Only a human can start again | **Allow agents again** | `wo resume --by NAME` |
 
 If an AI agent tries any of these, the factory refuses and writes the attempt in the audit
 ledger. It spots agent sessions by the markers that agent tools set (for example
-`CLAUDECODE`) and by the MCP channel.
+`CLAUDECODE`) and by the MCP channel. A dashboard started by an AI is read-only.
 
 **Honest limit:** on your own laptop this check is a speed bump, not a wall. A determined
 agent could unset those markers. The real wall is on the server: GitHub branch protection plus

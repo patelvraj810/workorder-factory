@@ -164,9 +164,9 @@ weight on getting domain owners to write invariants.
 
 | Person | Starts work | Steers | Reviews | Why they'd trust it | When it goes wrong |
 |---|---|---|---|---|---|
-| Engineer | `wo new` in their terminal, or from Claude Code / Cursor / Codex through the MCP server. If their laptop dies mid-session, the next run picks up from the last good commit | Edits `features.json`, adds a note to `progress.md`, re-runs a session | Only sees gated, small PRs with a session log | They wrote the invariants; they can read every step | Gate red → agent fixes first. 3 red gates in a row → agents stop and the owner gets `HANDBACK.md`; no PR is opened |
+| Engineer | Asks their AI tool (Claude Code, Cursor, Codex) through the MCP server, or `wo new` in a terminal. Watches and decides in the dashboard (`wo ui`). If their laptop dies mid-session, the next run picks up from the last good commit | Edits `features.json`, adds a note to `progress.md`, re-runs a session | Only sees gated, small PRs with a session log | They wrote the invariants; they can read every step | Gate red → agent fixes first. 3 red gates in a row → agents stop and the owner gets `HANDBACK.md`; no PR is opened |
 | Reviewer (CODEOWNER) | PR notification | Comments go into the next session's input | PR.md shows what was checked and what wasn't; planner's risks tell them where to look | Approval is pinned to the exact commit that passed | Can reject; rejection reason is logged and becomes an eval candidate |
-| Team lead | `wo stats` / dashboard | Owns `AGENTS.md` + prompts in the repo, reviewed like code | — | Numbers come from the ledger, not from surveys | Bad trend (first-gate pass rate falls) shows up weekly |
+| Team lead | `wo stats` / the `wo ui` dashboard; picks the project's preset (practice / normal / money-critical) | Owns `AGENTS.md` + prompts in the repo, reviewed like code | — | Numbers come from the ledger, not from surveys | Bad trend (first-gate pass rate falls) shows up weekly |
 | Compliance | Ledger export | Owns `factory.toml` with platform | Samples work orders; verifies chain | Tamper-evident, write-once storage | Broken chain = incident |
 
 **How I'd know it works for them** (measured from the ledger + Git host, reported weekly, failures included; `wo stats` already shows most of these):
@@ -309,11 +309,53 @@ General rule: start with one team, publish real numbers including failures, and 
 
 ---
 
+## 8b. Seeing it, and connecting it to the tools teams already use
+
+**What I learned using it myself:** the CLI is the engine, not the product. People already *talk* to
+their AI tool, so the factory doesn't need its own chat. It needs a **window**: one place to see what
+is happening and to make the decisions that must stay human. That is `wo ui`, a local dashboard:
+
+- **See:** every work order, a plain-English timeline of every step, each check with PASS / FAIL / WARN
+  and what it means, what the reviewer agent said, cost against budget, and the live tool calls of the
+  running AI session (allowed and blocked).
+- **Decide (humans only):** approve and merge, add a drafted rule, **accept a reviewer finding with a
+  written reason** (only the reviewer's opinions can be accepted, never a failed test or a broken
+  rule), stop all agents, allow them again.
+- **Rules in plain English:** a preset per project (practice / normal / money-critical), and every
+  setting shown with what it means. A change is a normal git commit under the person's name.
+- **Safety:** every button runs the same `wo` command a human would type. It is local only (127.0.0.1 +
+  a private token), and if an AI agent starts it, it opens read-only.
+
+**Integrations (design, not built).** The rule for all of them: integrations can **start work and
+inform people, never approve**. Approval stays with an authenticated person in the Git host or the dashboard.
+
+| Direction | Tools teams already use | What the factory does with it |
+|---|---|---|
+| Work comes in | Jira, Linear, ServiceNow, GitHub Issues | A ticket opens a work order: intent from the ticket, ticket ID in provenance, commits and the PR; status flows back to the ticket |
+| Context comes in | Confluence, Notion, ADRs | Linked pages feed `AGENTS.md` and the planner, read-only (for example through the vendor's MCP server) |
+| People are told | Slack, Microsoft Teams, email | "WO-012 needs you" with a link to the dashboard or PR; hand-backs and blocked agent actions go to the owner |
+| Decisions | GitHub, GitLab, Bitbucket | Gate as a required **PR check**; CODEOWNERS approve on the PR; branch protection is the real wall |
+| Checks run again | GitHub Actions, GitLab CI, Jenkins, Buildkite | `wo ci` re-runs the deterministic gate on a clean checkout |
+| Identity | Okta, Microsoft Entra (SSO) | Replaces the `--by` name; approvals tied to a real login |
+| Stop | PagerDuty, Opsgenie | An open incident on a service can flip its kill switch, so agents don't change code mid-incident |
+| Numbers | Datadog, Grafana, a BI tool | Ledger events exported for team dashboards |
+| Ownership | Backstage catalog | Owner and risk tier pick the preset and the required reviewers |
+| Secrets | Vault, cloud secret managers | Agents never see secrets; short-lived, scoped credentials per session |
+
+**How, technically:** two small extension points instead of one-off integrations. **Inbound:** "a ticket
+becomes a work order" (webhook or poller → `wo new`). **Outbound:** every ledger event can be sent to a
+webhook, and Slack, Teams, Datadog and the ticket tool subscribe to the events they care about. The MCP
+server already covers the third direction: any AI tool can drive the factory under the same rules.
+
+**Order I'd build them:** Git host PR check → Slack/Teams notifications → Jira link → SSO → incident kill switch.
+
+---
+
 ## 9. First 90 days (short)
 
 | Days | Build | Expect to learn |
 |---|---|---|
-| 0–30 | Work order + gate as a **GitHub check** (not only a CLI and MCP). Provenance ledger to write-once storage, mapped to FINOS MI-23 with compliance. One pilot product team + the trading platform's invariants. Baseline metrics before any change | How many invariants a team will actually write. Baseline review time and PR size |
+| 0–30 | Work order + gate as a **GitHub check** (not only a CLI, MCP and the local dashboard). Provenance ledger to write-once storage, mapped to FINOS MI-23 with compliance. One pilot product team + the trading platform's invariants. Baseline metrics before any change | How many invariants a team will actually write. Baseline review time and PR size |
 | 31–60 | Isolated runners (no laptop creds), model routing, cost dashboard. Compliance sign-off on the authorship model. Second team | Real cost per merged change. Is the reviewer agent worth it (precision)? |
 | 61–90 | Paved road pilot with the ops analyst's tool. Long-running multi-session tasks at scale. First honest report to the AI Lead | Can a non-engineer ship safely? Does first-gate pass rate improve as AGENTS.md improves? |
 

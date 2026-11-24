@@ -593,3 +593,85 @@ def test_diff_cap_counts_agent_work_not_human_rules(repo, tmp_path):
     wo(repo, "rule", "WO-001", str(rule), "--by", "vraj")
     c = check_diff_size(repo / ".factory" / "worktrees" / "WO-001", "main", load_policy(repo))
     assert c.passed and "400 human-owned lines not counted" in c.detail
+
+
+# --- Presets, rules editing, accepting reviewer findings, dashboard -----------------------------------------
+
+def test_init_presets_set_strictness(tmp_path):
+    r = _git_repo(tmp_path / "solo")
+    main(["--repo", str(r), "init", "--user", "vraj", "--preset", "practice", "--stack", "python"])
+    pol = load_policy(r)
+    assert pol.preset == "practice" and pol.blocking_severity == "off" and not pol.require_independent_approver
+    r2 = _git_repo(tmp_path / "desk")
+    main(["--repo", str(r2), "init", "--user", "vraj", "--preset", "money-critical"])
+    assert load_policy(r2).blocking_severity == "medium" and load_policy(r2).require_independent_approver
+
+
+def test_rules_change_is_a_human_commit_and_refused_for_agents(repo, monkeypatch):
+    wo(repo, "rules", "--set", "max_diff_lines=300", "--set", "blocking_severity=medium", "--by", "lead")
+    pol = load_policy(repo)
+    assert pol.max_diff_lines == 300 and pol.blocking_severity == "medium"
+    assert "# Max changed lines" in (repo / "factory.toml").read_text()            # comments kept
+    assert "Change-Type: policy" in gitops.git(repo, "log", "-1", "--format=%B")
+    with pytest.raises(SystemExit, match="must be one of"):
+        wo(repo, "rules", "--set", "blocking_severity=whatever", "--by", "lead")
+    with pytest.raises(SystemExit, match="can't be changed here"):
+        wo(repo, "rules", "--set", "protected_paths=nothing", "--by", "lead")
+    monkeypatch.setenv("AI_AGENT", "1")
+    with pytest.raises(SystemExit, match="must be done by a human"):
+        wo(repo, "rules", "--preset", "practice", "--by", "lead")
+
+
+def test_accepting_a_reviewer_finding_needs_a_reason_and_only_overrules_opinions(repo):
+    from factory.workorder import WorkOrderStore
+    open_and_build(repo)
+    gate_fails(repo)                                       # gate 1: invariants AND reviewer fail
+    wt = repo / ".factory" / "worktrees" / "WO-001"
+    with pytest.raises(SystemExit, match="can't be overruled"):
+        wo(repo, "accept", "WO-001", "--finding", "1", "--reason", "looks fine to me really", "--by", "priya")
+    # Simulate a gate where only the reviewer objected (facts all pass).
+    store = WorkOrderStore(wt, "WO-001")
+    g = store.last_gate()
+    for c in g["checks"]:
+        if c["name"] != "independent reviewer agent":
+            c["passed"] = True
+    (store.dir / "gates" / f"gate-{g['number']}.json").write_text(json.dumps(g))
+    gitops.git(wt, "-c", "user.name=lead", "-c", "user.email=lead@example.com", "commit", "-qam", "test setup")
+    with pytest.raises(SystemExit, match="real reason"):
+        wo(repo, "accept", "WO-001", "--finding", "1", "--reason", "ok", "--by", "priya")
+    wo(repo, "accept", "WO-001", "--finding", "1", "--reason", "Known limit, tracked as WO-002", "--by", "priya")
+    g = store.last_gate()
+    assert g["passed"] and g["accepted"][0]["by"] == "priya"
+    events = [e["event"] for e in Ledger(repo / ".factory" / "ledger.jsonl").entries()]
+    assert "finding.accepted" in events and "gate.accepted" in events
+
+
+def test_dashboard_reads_state_and_runs_only_whitelisted_commands(repo):
+    from factory import ui
+    open_and_build(repo)
+    state = ui.collect_state(repo, "priya", None)
+    assert state["work_orders"][0]["id"] == "WO-001" and state["rules"]
+    detail = ui.collect_detail(repo, "WO-001")
+    assert detail["features"] and any("Opened by vraj" in t["text"] for t in detail["timeline"])
+    assert ui.build_command({"action": "approve", "wo": "WO-001"}, "priya", []) == \
+        ["approve", "WO-001", "--by", "priya", "--merge"]
+    for bad in ({"action": "approve", "wo": "WO-1; rm -rf /"}, {"action": "rule", "wo": "WO-001", "file": "../x.py"},
+                {"action": "shell", "wo": "WO-001"}):
+        with pytest.raises(ValueError):
+            ui.build_command(bad, "priya", ["test_ok.py"])
+
+
+def test_dashboard_is_read_only_inside_an_agent_session(repo, monkeypatch):
+    import threading, urllib.request
+    from http.server import ThreadingHTTPServer
+    from factory import ui
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), ui.make_handler(repo, "priya", "tok", "CLAUDECODE"))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    req = urllib.request.Request(base + "/api/action", data=b'{"action":"kill"}',
+                                 headers={"X-Token": "tok", "Content-Type": "application/json"})
+    out = json.loads(urllib.request.urlopen(req).read())
+    assert not out["ok"] and "read-only" in out["output"]
+    with pytest.raises(urllib.error.HTTPError):                       # no token, no data
+        urllib.request.urlopen(base + "/api/state")
+    srv.shutdown()
