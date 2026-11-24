@@ -4,7 +4,7 @@
 [policy]
 # Paths agents may never write. Enforced twice: a pre-tool hook blocks the write,
 # and the gate fails if the diff touches them anyway.
-protected_paths = ["invariants/", "factory.toml", "CODEOWNERS", ".github/", ".factory/ledger.jsonl"]
+protected_paths = ["invariants/", "factory.toml", "CODEOWNERS", "catalog-info.yaml", ".github/", ".factory/ledger.jsonl"]
 
 # Files agents may never read (secrets).
 secret_paths = [".env", "*.pem", "*.key"]

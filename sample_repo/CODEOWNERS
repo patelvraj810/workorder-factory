@@ -2,4 +2,5 @@
 /invariants/     @trading-platform-leads
 /factory.toml    @ai-platform @security-compliance
 /CODEOWNERS      @ai-platform @security-compliance
+/catalog-info.yaml @trading-platform-leads @ai-platform
 /.github/        @ai-platform

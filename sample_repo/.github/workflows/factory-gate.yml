@@ -1,0 +1,25 @@
+# Re-runs the factory gate on every pull request (same checks as on the laptop).
+# Human-owned file: agents can't edit .github/ (protected path).
+# Deterministic checks only: no model calls and no model API keys in CI. The reviewer agent's
+# verdict is read from the gate report recorded in the branch, not re-run.
+name: factory-gate
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the gate diffs against the target branch
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the factory
+        # Replace with your internal package index or repo URL.
+        run: pip install "workorder-factory @ git+https://github.com/YOUR-ORG/workorder-factory"
+      - name: Re-run the gate (same checks as wo gate, plus provenance trailers)
+        run: wo --repo . ci --base "origin/${{ github.base_ref }}"

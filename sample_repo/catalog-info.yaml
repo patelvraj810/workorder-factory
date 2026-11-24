@@ -1,0 +1,17 @@
+# Software catalog entry (Backstage format). Human-owned.
+# Tells everyone, and the factory, who owns this service and how risky changes to it are.
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: order-validation
+  description: Pre-trade order validation (synthetic sample service)
+  tags: [trading, risk-critical]
+  annotations:
+    workorder-factory/policy: factory.toml
+    workorder-factory/invariants: invariants/
+    workorder-factory/risk-tier: "T2"   # T0 personal · T1 team tool, read-only data · T2 money or orders
+spec:
+  type: service
+  lifecycle: production
+  owner: group:trading-platform-leads
+  system: order-management

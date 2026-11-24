@@ -25,5 +25,5 @@ Instructions for any coding agent working on THIS repository (the factory, not t
 ```bash
 python -m pytest -q tests/          # harness tests (includes the evals)
 python evals/run_evals.py           # gate eval table
-./demo.sh && ./demo-stop-limit.sh   # both stories, replay backend
+./demo.sh && ./demo-when-it-goes-wrong.sh   # both stories, replay backend
 ```

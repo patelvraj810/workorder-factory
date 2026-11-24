@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -291,3 +292,102 @@ def test_mcp_server_exposes_no_approval_tools(repo, monkeypatch):
     anyio.run(go)
     created = [e for e in Ledger(repo / ".factory/ledger.jsonl").entries() if e["event"] == "workorder.created"][0]
     assert created["actor"] == "vraj" and created["data"]["channel"] == "mcp"
+
+
+# --- durable work orders (crash recovery), CI gate, scorecard, catalog ------------------------
+
+def _wo_subprocess(repo, *args, **env):
+    import subprocess
+    import sys
+    e = {**os.environ, "WO_BACKEND": "replay", "WO_REPLAY_DIR": str(REPLAYS), **env}
+    return subprocess.run([sys.executable, "-m", "factory.cli", "--repo", str(repo), *args],
+                          capture_output=True, text=True, env=e)
+
+
+def test_hard_crash_mid_session_is_recovered(repo):
+    wo(repo, "new", "x", "--by", "vraj", "--intent", "x",
+       "--invariant", str(REPLAYS / "human" / "test_position_limit_invariants.py"))
+    wo(repo, "plan", "WO-001")
+    wo(repo, "run", "WO-001")
+    p = _wo_subprocess(repo, "run", "WO-001", WO_SIMULATE_CRASH="session-2")
+    assert p.returncode == 137  # the process really died
+    wt = repo / ".factory/worktrees/WO-001"
+    assert gitops.git(wt, "status", "--porcelain")  # half-done edits left behind
+    wo(repo, "run", "WO-001")  # recovers, then runs session 2 cleanly
+    events = Ledger(repo / ".factory/ledger.jsonl").entries()
+    abandoned = [e for e in events if e["event"] == "session.abandoned"]
+    assert len(abandoned) == 1 and abandoned[0]["data"]["tool_calls"] == {"Write": 2}  # tool log survived the crash
+    assert any(e["event"] == "workorder.recovered" and e["data"]["leftover_evidence"] for e in events)
+    assert (wt / ".factory/WO-001/recovered").exists()
+    assert not gitops.git(wt, "status", "--porcelain")
+    from factory.cli import Ctx, provenance
+    import argparse
+    ok, rows, problems = provenance(Ctx(argparse.Namespace(repo=str(repo))), "WO-001")
+    assert ok, problems
+    assert "abandoned" in [r["result"] for r in rows]
+
+
+def test_failed_session_is_recovered(repo, monkeypatch):
+    wo(repo, "new", "x", "--by", "vraj", "--intent", "x")
+    from factory import agents
+    real = agents.ReplayBackend.run
+
+    def explode(self, role, prompt, cwd, *a, **k):
+        (cwd / "orders" / "half_done.py").write_text("# half done\n")
+        raise RuntimeError("model API timed out")
+    monkeypatch.setattr(agents.ReplayBackend, "run", explode)
+    with pytest.raises(RuntimeError):
+        wo(repo, "plan", "WO-001")
+    monkeypatch.setattr(agents.ReplayBackend, "run", real)
+    wo(repo, "plan", "WO-001")
+    wt = repo / ".factory/worktrees/WO-001"
+    assert not (wt / "orders" / "half_done.py").exists()
+    events = [e["event"] for e in Ledger(repo / ".factory/ledger.jsonl").entries()]
+    assert events.index("session.failed") < events.index("workorder.recovered") < events.index("plan.created")
+
+
+def test_human_uncommitted_changes_are_never_wiped(repo):
+    open_and_build(repo)
+    wt = repo / ".factory/worktrees/WO-001"
+    (wt / "README.md").write_text("human notes\n")
+    with pytest.raises(SystemExit, match="no agent session owns"):
+        wo(repo, "gate", "WO-001")
+    assert (wt / "README.md").read_text() == "human notes\n"
+
+
+def test_ci_gate_passes_on_green_branch_and_fails_on_drift(repo):
+    open_and_build(repo)
+    gate_fails(repo)
+    wo(repo, "run", "WO-001")
+    wo(repo, "gate", "WO-001")
+    wt = repo / ".factory/worktrees/WO-001"
+    main(["--repo", str(wt), "ci", "--base", "main"])  # same checks pass in a plain checkout
+    (wt / "orders" / "validation.py").write_text((wt / "orders" / "validation.py").read_text() + "\n# late\n")
+    gitops.commit(wt, "late change", "vraj", "vraj@example.com", {})
+    with pytest.raises(SystemExit):
+        main(["--repo", str(wt), "ci", "--base", "main"])
+
+
+def test_ci_gate_fails_on_agent_commit_without_trailers(repo):
+    open_and_build(repo)
+    wt = repo / ".factory/worktrees/WO-001"
+    (wt / "orders" / "extra.py").write_text("X = 1\n")
+    gitops.commit(wt, "agent commit outside the factory", gitops.AGENT_NAME, gitops.AGENT_EMAIL, {"Work-Order": "WO-001"})
+    with pytest.raises(SystemExit):
+        main(["--repo", str(wt), "ci", "--base", "main"])
+
+
+def test_scorecard_and_catalog_owner(repo, capsys, monkeypatch):
+    from factory import cli
+    monkeypatch.setattr(cli.console, "width", 250)  # keep table rows on one line for the assertion
+    open_and_build(repo)
+    gate_fails(repo)
+    wo(repo, "run", "WO-001")
+    wo(repo, "gate", "WO-001")
+    wo(repo, "pr", "WO-001")
+    capsys.readouterr()
+    wo(repo, "stats")
+    out = capsys.readouterr().out
+    assert "Agent scorecard" in out and "agreed with tests 2/2" in out
+    pr = (repo / ".factory/worktrees/WO-001/.factory/WO-001/PR.md").read_text()
+    assert "group:trading-platform-leads" in pr and "T2" in pr

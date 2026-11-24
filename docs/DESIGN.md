@@ -134,6 +134,8 @@ wrong way. So I treat the gate as a security boundary and threat-model it like o
 | 11 | Agent acts without a record | Crash or bug skips logging | Provenance record written **before** the session starts; if the write fails, the agent never starts (fail closed). Every agent commit must trace to a record before approval | ✅ |
 | 12 | Agent retries forever | Keeps "fixing" the wrong thing, burns money, then opens a PR anyway | Stop limit: 3 failed gates in a row → agents stop, owner gets `HANDBACK.md`, no PR. Per-work-order budget does the same | ✅ |
 | 13 | Something looks wrong right now | Odd tool calls across many work orders | Kill switch: `wo kill` stops every new session at once; only a human can `wo resume` | ✅ |
+| 15 | Session dies halfway | Laptop sleeps or process is killed mid-edit; half-written files get mixed into the next session's commit | **Durable work orders**: the next run finds the unfinished session, keeps the leftovers as evidence, resets the sandbox to the last good commit, records it as abandoned (with the tool calls it made, logged to disk as they happened), then continues. Never wipes changes no agent owns | ✅ |
+| 16 | Someone skips the factory | Pushes agent code straight to a PR | **Same gate in CI**: `wo ci` re-runs the deterministic checks on the PR, checks every agent commit has provenance trailers, and checks the recorded gate matches the code | ✅ (workflow file; not run on GitHub here) |
 | 14 | Agent approves via its tools | Agent in Claude Code calls an "approve" tool | The MCP server has no approve, merge or resume tool. Agents can stop things, never start them again | ✅ |
 
 **Measured:** `evals/run_evals.py` runs 9 of these as seeded agent changes. 9/9 caught, and the correct
@@ -153,7 +155,7 @@ weight on getting domain owners to write invariants.
 
 | Person | Starts work | Steers | Reviews | Why they'd trust it | When it goes wrong |
 |---|---|---|---|---|---|
-| Engineer | `wo new` in their terminal, or from Claude Code / Cursor / Codex through the MCP server | Edits `features.json`, adds a note to `progress.md`, re-runs a session | Only sees gated, small PRs with a session log | They wrote the invariants; they can read every step | Gate red → agent fixes first. 3 red gates in a row → agents stop and the owner gets `HANDBACK.md`; no PR is opened |
+| Engineer | `wo new` in their terminal, or from Claude Code / Cursor / Codex through the MCP server. If their laptop dies mid-session, the next run picks up from the last good commit | Edits `features.json`, adds a note to `progress.md`, re-runs a session | Only sees gated, small PRs with a session log | They wrote the invariants; they can read every step | Gate red → agent fixes first. 3 red gates in a row → agents stop and the owner gets `HANDBACK.md`; no PR is opened |
 | Reviewer (CODEOWNER) | PR notification | Comments go into the next session's input | PR.md shows what was checked and what wasn't; planner's risks tell them where to look | Approval is pinned to the exact commit that passed | Can reject; rejection reason is logged and becomes an eval candidate |
 | Team lead | `wo stats` / dashboard | Owns `AGENTS.md` + prompts in the repo, reviewed like code | — | Numbers come from the ledger, not from surveys | Bad trend (first-gate pass rate falls) shows up weekly |
 | Compliance | Ledger export | Owns `factory.toml` with platform | Samples work orders; verifies chain | Tamper-evident, write-once storage | Broken chain = incident |
@@ -165,6 +167,8 @@ weight on getting domain owners to write invariants.
 - Reviewer-agent precision: how often humans agree with its blocking findings (is it worth the money?)
 - Cost per merged work order; share approved by a second person (enforced, so it should be 100%)
 - Hand-backs: how often agents give up (too many = bad tickets or weak AGENTS.md)
+- Agent scorecard by role and model: first-gate pass rate, fix sessions, cost, and for the reviewer agent,
+  how often it agreed with the tests and how often it blocked when tests passed (real catch or noise?)
 - Voluntary repeat use: % of engineers who used it again within 2 weeks
 
 ---
@@ -235,6 +239,16 @@ workload identity — never the engineer's own creds); per-team model routing an
 
 ---
 
+**Ideas I borrowed, and from where** (small versions, sized to this assignment):
+
+| From | Their idea | My small version |
+|---|---|---|
+| Temporal (durable execution) | Long workflows survive crashes and continue from the last finished step | Work orders recover from crashed or failed sessions and continue from the last good commit |
+| Dagger (CI as code) | The same pipeline runs the same way on a laptop and in CI | `wo ci` runs the same gate checks in GitHub Actions |
+| Paperclip (agent orchestration) | Performance reviews for agents; budgets per agent | Agent scorecard in `wo stats` by role and model; per-session and per-work-order budgets |
+| Backstage (developer portal) | Software catalog with owners; templates as "golden paths" | `catalog-info.yaml` gives the owning team and risk tier, shown on every PR; the paved road in §7 |
+| FINOS SDLC Common Controls | Shared control language for financial services | MI-23 provenance, control map above |
+
 **Bigger pieces I'd build next, not in the prototype** (each is a real project, not a 4-hour job):
 - **Supervisor + parallel workers**: many work orders at once, one worker each, one container each.
 - **Model gateway**: one door for every model call. It checks who is calling, applies per-team model rules
@@ -253,6 +267,9 @@ The ops analyst did something valuable. The answer is a **paved road**, not a ba
   T2 writes data or moves money → normal engineering path with an engineering owner.
 - **Paved road for T1**: a template (small web app), hosted on the platform behind SSO (not a laptop),
   data from governed **read-only views** (not raw exports), same work order + gate.
+  In practice: a Backstage-style **software template** creates the repo with `AGENTS.md`, `factory.toml`,
+  an empty `invariants/` folder and a `catalog-info.yaml` that records the owner, the engineering
+  sponsor and the risk tier. Engineering can finally see every app that exists and who owns it.
 - **Invariants in plain language**: the analyst writes examples — "given these two files, these 3 rows
   must be flagged" — the agent turns them into tests, the analyst confirms. That is the analyst's
   equivalent of owning invariants.

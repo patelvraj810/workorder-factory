@@ -25,8 +25,9 @@ wo pr    WO-001     # PR text with provenance — refused unless the gate passed
 wo provenance WO-001                    # FINOS MI-23 record for every agent step
 wo approve WO-001 --by vraj             # REFUSED: author cannot approve
 wo approve WO-001 --by priya --merge    # checks gate + provenance, merges with trailers
+wo ci --base main  # same gate in CI (GitHub Actions workflow in sample_repo/.github/)
 wo ledger verify   # hash chain + signatures
-wo stats           # flow, quality, control and cost metrics for a team lead
+wo stats           # flow, quality, control, cost + agent scorecard by role and model
 ```
 
 The bug the gate catches is real and typical: the agent's position-limit check used
@@ -34,8 +35,11 @@ The bug the gate catches is real and typical: the agent's position-limit check u
 reduce risk**. The agent's own tests only covered BUY, so they passed. The human-owned
 property test found the counter-example in under 2 seconds.
 
-And when it keeps going wrong: after **3 failed gates in a row** (or when the work order's budget
-runs out) agents stop, the owner gets a `HANDBACK.md` summary, and no PR is opened (`./demo-stop-limit.sh`).
+And when it goes wrong (`./demo-when-it-goes-wrong.sh`):
+- **A session crashes halfway** (laptop dies): the next run keeps the leftovers as evidence, resets the
+  sandbox to the last good commit, records the crashed step (with the tool calls it made), and continues.
+- **The agent keeps failing**: after 3 failed gates in a row (or when the budget runs out) agents stop,
+  the owner gets a `HANDBACK.md` summary, and no PR is opened.
 
 ## Run it
 
@@ -44,9 +48,9 @@ Requirements: Python 3.11+, git. Synthetic data only.
 ```bash
 pip install -e .
 ./demo.sh                     # main story, replay backend — deterministic, the demo backup
-./demo-stop-limit.sh          # the "it goes wrong" story
+./demo-when-it-goes-wrong.sh  # crash recovery + stop limit
 PAUSE=1 ./demo.sh             # step through it while presenting
-python -m pytest -q tests/    # 32 harness tests, including the gate evals
+python -m pytest -q tests/    # 38 harness tests, including the gate evals
 python evals/run_evals.py     # 9 agent failure modes the gate must catch
 ```
 
@@ -69,6 +73,9 @@ the exact red→green story every time. That's fine: the gate is the point.
 | Provenance & ledger | FINOS MI-23 fields per agent step, written **before** the agent starts (fail closed); hash chain; HMAC signatures | Local file + shared-secret HMAC. Production: write-once storage + KMS/Sigstore signing |
 | Approval | Approver ≠ requester, gate pinned to commit, provenance checked before merge | `--by` is a flag. Production: SSO identity + branch protection on the Git host |
 | Stop controls | Kill switch (`wo kill` + `factory.toml`), 3-failed-gates stop limit, per-session and per-work-order budgets | — |
+| Crash recovery | Real hard kill (`os._exit`) tested; leftovers kept as evidence; tool calls logged to disk as they happen | Crash is simulated with `WO_SIMULATE_CRASH` |
+| CI gate | `wo ci` runs and is tested locally | The GitHub Actions workflow file has not been run on GitHub; install URL is a placeholder |
+| Catalog | `catalog-info.yaml` (Backstage format) read for owner + risk tier on every PR | No Backstage portal |
 | MCP server | Works with any MCP client; no approve/merge/resume tools | Tested in-process, not yet in every client |
 | Target code | Synthetic order-validation service in Python | One repo, one language. Not tested on a real monorepo |
 
@@ -79,7 +86,7 @@ the exact red→green story every time. That's fine: the gate is the point.
 | Senior trading engineer | Agents quietly break order-handling invariants | Human-owned property tests in `invariants/`, agent cannot write them (hook + gate), run with `--noconftest` |
 | Early adopter | Huge PRs, tests written by the same agent | One feature per session, diff cap, independent reviewer agent on a different model that sees only the diff |
 | Security & compliance | Who is the author? Audit? Secrets? | Requester = accountable owner, agent = drafter, approver ≠ requester; FINOS MI-23 provenance; signed ledger; secret scan; bandit; kill switch |
-| Long-task engineer | Context lost between sessions | `features.json` + `progress.md` + `sessions/*.json`; each session starts cold from files |
+| Long-task engineer | Context lost between sessions | `features.json` + `progress.md` + `sessions/*.json`; each session starts cold from files; crashed sessions are recovered automatically |
 | Team lead | Everyone's own setup; can't tell if faster | Conventions live in the repo (`AGENTS.md`, `factory.toml`, prompts); MCP server so any tool uses the same rules; `wo stats` |
 | Platform engineer | Laptops, own creds, no record, no cost view | Worktree per work order, guard, budgets, cost per step in the ledger. *Real isolation is design-only* |
 | Ops analyst | Shadow app on a laptop | *Design only*, see DESIGN.md §7 |
@@ -88,9 +95,10 @@ the exact red→green story every time. That's fine: the gate is the point.
 ```
 factory/            wo CLI: cli.py, agents.py (backends + guard), gate.py, ledger.py, workorder.py, policy.py, mcp_server.py
 factory/prompts/    planner / implementer / reviewer prompts (the hand-off protocol)
-sample_repo/        synthetic order-validation service (target), with AGENTS.md, factory.toml, CODEOWNERS, invariants/
+sample_repo/        synthetic order-validation service (target), with AGENTS.md, factory.toml, CODEOWNERS,
+                    catalog-info.yaml, invariants/, .github/workflows/factory-gate.yml
 replays/WO-001/     recorded agent outputs for the demo story + the human-written invariant
 evals/              gate eval suite (9 failure modes)
-tests/              harness tests (32)
+tests/              harness tests (38)
 docs/               DESIGN.md, MCP.md
 ```

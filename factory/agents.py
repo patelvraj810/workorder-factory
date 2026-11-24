@@ -152,10 +152,22 @@ class AgentResult:
     replayed: bool = False
 
 
+def _live(path: Path | None, entry: dict[str, str]) -> None:
+    """Write each tool call to disk the moment it happens, so a crash can't erase what the agent touched."""
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as f:
+        f.write(json.dumps(entry) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
 # --- Real backend -----------------------------------------------------------------------
 
 class ClaudeBackend:
     name = "claude"
+    live_log: Path | None = None
 
     def run(self, role: str, prompt: str, cwd: Path, schema: dict, policy: Policy, replay_key: str = "") -> AgentResult:
         import anyio
@@ -177,6 +189,7 @@ class ClaudeBackend:
                 allowed, reason = guard(tool, tin, cwd, policy)
             target = tin.get("file_path") or tin.get("path") or tin.get("command") or tin.get("pattern") or ""
             tool_log.append({"tool": tool, "target": str(target)[:200], "allowed": str(allowed)})
+            _live(self.live_log, {**tool_log[-1], **({"reason": reason} if not allowed else {})})
             if allowed:
                 return {}
             denials.append({"tool": tool, "target": str(target)[:200], "reason": reason})
@@ -224,6 +237,7 @@ class ReplayBackend:
     """
 
     name = "replay"
+    live_log: Path | None = None
 
     def __init__(self, replay_dir: Path):
         self.dir = replay_dir
@@ -243,6 +257,7 @@ class ReplayBackend:
             for rel in touched:
                 ok, reason = guard("Write", {"file_path": rel}, cwd, policy)
                 tool_log.append({"tool": "Write", "target": rel, "allowed": str(ok)})
+                _live(self.live_log, tool_log[-1])
                 if not ok:
                     blocked.append(rel)
                     denials.append({"tool": "Write", "target": rel, "reason": reason})
@@ -250,6 +265,9 @@ class ReplayBackend:
             p = subprocess.run(["git", "apply", *excludes, str(patch)], cwd=cwd, capture_output=True, text=True)
             if p.returncode != 0:
                 raise RuntimeError(f"replay patch {patch.name} did not apply: {p.stderr}")
+            if os.environ.get("WO_SIMULATE_CRASH") == replay_key:
+                # Demo/test only: die like a laptop losing power mid-session. No handler runs.
+                os._exit(137)
         meta = rec.get("meta", {})
         return AgentResult(
             role=role, model=f"replay:{meta.get('model', model_for(role))}", structured=rec["output"],

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import json
 import os
 import shutil
@@ -29,7 +30,7 @@ from rich.table import Table
 
 from factory import gitops
 from factory.agents import PLAN_SCHEMA, REVIEW_SCHEMA, ROLE_TOOLS, SESSION_SCHEMA, AgentResult, get_backend, model_for, render
-from factory.gate import apply_review, reviewer_prompt, run_checks
+from factory.gate import Check, apply_review, reviewer_prompt, run_checks
 from factory.ledger import Ledger
 from factory.policy import load_policy_at, policy_sha
 from factory.workorder import Feature, WorkOrder, WorkOrderStore
@@ -143,6 +144,66 @@ class Ctx:
         console.print(f"[bold red]STOP LIMIT:[/] {reason}. Agents stopped. Handed back to {wo.requester}. "
                       f"No PR. See .factory/{wo.id}/HANDBACK.md")
 
+    # -- durable work orders (idea from Temporal: survive crashes, resume from the last good step) --
+    def recover(self, wo: WorkOrder) -> list[int]:
+        """Find agent sessions that never finished (process died) or failed, keep their leftovers as
+        evidence, put the sandbox back to the last good commit, and record what happened.
+
+        Uncommitted changes are only discarded when they belong to a broken agent session.
+        If the last agent session closed cleanly, leftover changes are a human's work: refuse, never wipe.
+        """
+        wt = self.worktree(wo.id)
+        events = self.ledger.for_work_order(wo.id)
+        closed = {e["data"]["started_seq"]: e for e in events
+                  if e["event"] in ("plan.created", "session.completed", "review.completed", "session.failed", "session.abandoned") and "started_seq" in e["data"]}
+        started = [e for e in events if e["event"] == "session.started"]
+        orphans = [s for s in started if s["seq"] not in closed]
+        recovered = {e["data"]["started_seq"] for e in events if e["event"] == "workorder.recovered"}
+        broken = [s for s in started if s["seq"] in closed and closed[s["seq"]]["event"] == "session.failed"
+                  and s["seq"] not in recovered]
+        dirty = gitops.git(wt, "status", "--porcelain")
+        if not orphans and not broken:
+            if dirty:
+                raise SystemExit(f"{wo.id} has uncommitted changes that no agent session owns:\n{dirty}\n"
+                                 f"Commit them (they become human-authored) or discard them, then retry.")
+            return []
+        for s in orphans:
+            log_rel = f".factory/{wo.id}/sessions/{s['data'].get('key', s['seq'])}-abandoned.json"
+            (wt / log_rel).parent.mkdir(parents=True, exist_ok=True)
+            (wt / log_rel).write_text(json.dumps({"started_seq": s["seq"], "role": s["data"].get("role"),
+                                                  "reason": "no completion record: the process died (crash, kill, power loss)"},
+                                                 indent=2) + "\n")
+            live = wt / f".factory/{wo.id}/sessions/{s['data'].get('key', s['seq'])}.tools.jsonl"
+            self.ledger.append("session.abandoned", wo.id, "factory", started_seq=s["seq"], role=s["data"].get("role"),
+                               result="abandoned", session_log=log_rel, tool_calls=_tool_counts(live),
+                               tool_log=str(live.relative_to(wt)) if live.exists() else None)
+        evidence = ""
+        if dirty:
+            gitops.git(wt, "add", "-A", "--", ".", ":(exclude).factory")
+            leftover = gitops.git(wt, "diff", "--cached", "--", ".", ":(exclude).factory")
+            gitops.git(wt, "reset", "-q")
+            seqs = "-".join(str(x["seq"]) for x in orphans + broken)
+            evidence = f".factory/{wo.id}/recovered/after-step-{seqs}.patch"
+            # Put the sandbox back to the last good commit (sandbox only; never touches main).
+            gitops.git(wt, "checkout", "-q", "--", ".")
+            gitops.git(wt, "clean", "-fdq", "--", ".", ":(exclude).factory")
+            (wt / evidence).parent.mkdir(parents=True, exist_ok=True)
+            (wt / evidence).write_text(leftover + "\n")
+        gitops.commit(wt, f"{wo.id}: recovered from {len(orphans)} abandoned / {len(broken)} failed session(s)",
+                      gitops.FACTORY_NAME, gitops.FACTORY_EMAIL, {"Work-Order": wo.id, "Change-Type": "recovery"})
+        for s in orphans + broken:
+            self.ledger.append("workorder.recovered", wo.id, "factory", started_seq=s["seq"],
+                               leftover_evidence=evidence or None)
+        WorkOrderStore(wt, wo.id).append_progress(
+            f"## Recovery\nSession step(s) {', '.join(str(x['seq']) for x in orphans + broken)} did not finish. "
+            f"Half-done changes were discarded and kept as evidence"
+            f"{' in `' + evidence + '`' if evidence else ''}. Continue from the last good commit.")
+        gitops.commit(wt, f"{wo.id}: progress note after recovery", gitops.FACTORY_NAME, gitops.FACTORY_EMAIL,
+                      {"Work-Order": wo.id, "Change-Type": "recovery"})
+        console.print(f"[bold yellow]RECOVERED[/] {len(orphans)} abandoned + {len(broken)} failed session(s). "
+                      f"Sandbox reset to last good commit." + (f" Leftovers kept: {evidence}" if evidence else ""))
+        return [x["seq"] for x in orphans + broken]
+
     # -- the one way any agent runs: audit first, fail closed ------------------------------
     def agent_session(self, wo: WorkOrder, role: str, key: str, prompt: str, schema: dict,
                       task: dict) -> tuple[AgentResult, dict, str]:
@@ -157,9 +218,11 @@ class Ctx:
                            "Budget stop, not a gate failure.")
             raise SystemExit(1)
 
+        self.recover(wo)  # durable work orders: clean up after any crashed or failed session first
         prompt_file = PROMPTS_DIR / f"{role}.md"
         provenance = {
             "role": role,
+            "key": key,
             "harness": self.harness(),
             "model": model_for(role),
             "tools_allowed": ROLE_TOOLS[role],
@@ -181,11 +244,19 @@ class Ctx:
             start = self.ledger.append("session.started", wo.id, f"agent:{model_for(role)}", **provenance)
         except Exception as e:  # noqa: BLE001
             raise SystemExit(f"Audit record could not be written ({e}). Agent session NOT started.")
+        backend = self.backend()
+        live_rel = f".factory/{wo.id}/sessions/{key}.tools.jsonl"
+        backend.live_log = wt / live_rel
         try:
-            res = self.backend().run(role, prompt, wt, schema, self.policy, replay_key=key)
+            res = backend.run(role, prompt, wt, schema, self.policy, replay_key=key)
         except BaseException as e:
+            log_rel = f".factory/{wo.id}/sessions/{key}-failed.json"
+            (wt / log_rel).parent.mkdir(parents=True, exist_ok=True)
+            (wt / log_rel).write_text(json.dumps({"role": role, "started_seq": start["seq"], "error": str(e)[:2000],
+                                                  "error_type": type(e).__name__}, indent=2) + "\n")
             self.ledger.append("session.failed", wo.id, f"agent:{model_for(role)}", started_seq=start["seq"],
-                               role=role, error=str(e)[:500])
+                               role=role, result="failed", error=str(e)[:500], session_log=log_rel,
+                               tool_calls=_tool_counts(wt / live_rel))
             raise
         log_rel = f".factory/{wo.id}/sessions/{key}.json"
         (wt / log_rel).parent.mkdir(parents=True, exist_ok=True)
@@ -212,6 +283,13 @@ class Ctx:
         (self.record_dir / f"{key}.json").write_text(json.dumps({"meta": meta, "output": result.structured}, indent=2))
         if patch:
             (self.record_dir / f"{key}.patch").write_text(patch + "\n")
+
+
+def _tool_counts(live_log: Path) -> dict[str, int]:
+    """Tool calls recorded on disk during a session (survives crashes)."""
+    if not live_log.exists():
+        return {}
+    return dict(Counter(json.loads(ln)["tool"] for ln in live_log.read_text().splitlines() if ln.strip()))
 
 
 def derive_status(ctx: Ctx, wo_id: str) -> str:
@@ -247,7 +325,7 @@ def provenance(ctx: Ctx, wo_id: str) -> tuple[bool, list[dict], list[str]]:
     events = ctx.ledger.for_work_order(wo_id)
     wt = ctx.worktree(wo_id)
     closers = {e["data"]["started_seq"]: e for e in events
-               if e["event"] in ("plan.created", "session.completed", "review.completed", "session.failed")
+               if e["event"] in ("plan.created", "session.completed", "review.completed", "session.failed", "session.abandoned")
                and "started_seq" in e["data"]}
     rows, problems = [], []
     for s in (e for e in events if e["event"] == "session.started"):
@@ -260,7 +338,7 @@ def provenance(ctx: Ctx, wo_id: str) -> tuple[bool, list[dict], list[str]]:
             "tools": "tools_allowed" in d and "tool_calls" in cd,
             "session log": log_ok,
             "task": bool(d.get("task")),
-            "result": bool(c) and c["event"] != "session.failed",
+            "result": bool(c) and bool(cd.get("result")),
             "accountable human": bool(d.get("accountable_human")),
             "start/end time": bool(c),
         }
@@ -269,7 +347,7 @@ def provenance(ctx: Ctx, wo_id: str) -> tuple[bool, list[dict], list[str]]:
             problems.append(f"step {s['seq']} ({d.get('role')}): missing {', '.join(missing)}")
         rows.append({"seq": s["seq"], "role": d.get("role"), "model": cd.get("model", d.get("model")),
                      "harness": d.get("harness"), "start": s["ts"], "end": c["ts"] if c else "",
-                     "result": c["event"] if c else "never closed", "commit": cd.get("commit", ""),
+                     "result": cd.get("result", "never closed") if c else "never closed", "commit": cd.get("commit", ""),
                      "log": cd.get("session_log", ""), "missing": missing})
     # Every agent-authored commit must trace back to a recorded session.
     wo = WorkOrderStore(wt, wo_id).load_wo()
@@ -357,6 +435,7 @@ def cmd_run(args) -> None:
     if status == "handed back":
         raise SystemExit(f"{wo.id} was handed back to {wo.requester}. Agents are stopped. "
                          f"Fix it by hand and run `wo gate {wo.id}`, or open a new work order.")
+    ctx.recover(wo)
 
     last_gate = store.last_gate()
     sessions = ctx.events(wo.id, "session.completed")
@@ -425,6 +504,7 @@ def cmd_gate(args) -> None:
     wo = store.load_wo()
     wt = ctx.worktree(wo.id)
     wo_dict = json.loads((store.dir / "workorder.json").read_text())
+    ctx.recover(wo)  # never gate half-written or uncommitted code: the report must match the commit it names
     n = len(store.gate_reports()) + 1
     with console.status("Gate: tests, invariants, scans..."):
         report = run_checks(wt, wo.base_branch, wo.id, ctx.policy)
@@ -498,7 +578,10 @@ def cmd_pr(args) -> None:
                      f"${e['data']['cost_usd']:.2f} | {len(e['data']['denials'])} | `{e['data']['commit'][:8]}` |"
                      for e in sessions)
     diffstat = gitops.git(wt, "diff", "--stat", f"{wo.base_branch}...HEAD", "--", ".", ":(exclude).factory")
+    owner, tier = catalog_owner(wt)
     body = f"""# {wo.id}: {wo.title}
+
+**Owning team (from catalog-info.yaml):** {owner} · **Risk tier:** {tier} — the approver should come from the owning team.
 
 ## Intent (from {wo.requester})
 {wo.intent}
@@ -538,6 +621,17 @@ Read `.factory/{wo.id}/progress.md` for the session log, then focus on the risks
     ctx.ledger.append("pr.prepared", wo.id, "factory", path=f".factory/{wo.id}/PR.md")
     console.print(Markdown(body))
     console.print(f"[dim]Written to .factory/{wo.id}/PR.md. With a remote: gh pr create -F .factory/{wo.id}/PR.md[/]")
+
+
+def catalog_owner(repo: Path) -> tuple[str, str]:
+    """Owner and risk tier from a Backstage-style catalog-info.yaml (idea from Backstage's software catalog)."""
+    p = repo / "catalog-info.yaml"
+    if not p.exists():
+        return "unknown (no catalog-info.yaml)", "unknown"
+    text = p.read_text()
+    owner = re.search(r"^\s*owner:\s*(\S+)", text, flags=re.M)
+    tier = re.search(r"risk-tier:\s*\"?(T\d)", text)
+    return (owner.group(1) if owner else "unknown"), (tier.group(1) if tier else "unknown")
 
 
 def cmd_provenance(args) -> None:
@@ -601,6 +695,59 @@ def cmd_approve(args) -> None:
                       "Production deploy stays in your normal release pipeline.")
 
 
+def cmd_ci(args) -> None:
+    """Re-run the gate in CI, on a plain checkout (idea from Dagger: same checks locally and in CI).
+
+    Deterministic checks only: no model calls, no secrets needed in CI. Then it checks that every
+    agent commit carries provenance trailers, and that the gate recorded on the laptop matches the
+    code being merged. If someone skipped the factory, CI still catches it.
+    """
+    repo = Path(args.repo).resolve()
+    policy = load_policy_at(repo, args.base)  # trusted copy from the target branch
+    log = gitops.git(repo, "log", "--format=%B", f"{args.base}..HEAD")
+    wo_ids = sorted(set(re.findall(r"^Work-Order: (WO-\d+)", log, flags=re.M)))
+    report = run_checks(repo, args.base, ",".join(wo_ids) or "none", policy)
+
+    need = ("Work-Order", "Accountable-Owner", "Agent-Model", "Agent-Session")
+    bad = []
+    for sha in gitops.git(repo, "log", f"--author={gitops.AGENT_EMAIL}", "--format=%H", f"{args.base}..HEAD").split():
+        body = gitops.git(repo, "show", "-s", "--format=%B", sha)
+        missing = [t for t in need if f"\n{t}: " not in "\n" + body]
+        if missing:
+            bad.append(f"{sha[:10]} missing {', '.join(missing)}")
+    report.checks.append(Check("agent commit trailers", not bad, "; ".join(bad) or "every agent commit carries provenance trailers"))
+
+    for wid in wo_ids:
+        gates = sorted((repo / ".factory" / wid / "gates").glob("gate-*.json"), key=lambda p: int(p.stem.split("-")[1]))
+        if not gates:
+            report.checks.append(Check(f"{wid} recorded gate", False, "no gate report in the branch"))
+            continue
+        g = json.loads(gates[-1].read_text())
+        drift = gitops.git(repo, "diff", "--name-only", g["code_sha"], "HEAD", "--", ".", ":(exclude).factory", check=False)
+        ok = g["passed"] and not drift
+        report.checks.append(Check(f"{wid} recorded gate matches", ok,
+                                   f"gate {g['number']} {'passed' if g['passed'] else 'FAILED'} on {g['code_sha'][:10]}"
+                                   + (f"; code changed since: {drift.split()[0]}..." if drift else "; no code changes since")))
+    if not wo_ids and gitops.git(repo, "log", f"--author={gitops.AGENT_EMAIL}", "--format=%H", f"{args.base}..HEAD"):
+        report.checks.append(Check("work order", False, "agent commits found but no Work-Order trailer"))
+    passed = all(c.passed or not c.blocking for c in report.checks)
+
+    t = Table(title=f"CI gate on {gitops.head(repo)[:10]} vs {args.base} ({', '.join(wo_ids) or 'no work order'})")
+    t.add_column("Check"); t.add_column("Result"); t.add_column("Detail", overflow="fold")
+    for c in report.checks:
+        t.add_row(c.name, "[green]PASS[/]" if c.passed else "[red]FAIL[/]", c.detail[:400])
+    console.print(t)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a") as f:
+            f.write(f"## Factory CI gate: {'PASS' if passed else 'FAIL'}\n\n| Check | Result | Detail |\n|---|---|---|\n")
+            for c in report.checks:
+                f.write(f"| {c.name} | {'PASS' if c.passed else 'FAIL'} | {c.detail.splitlines()[0][:150] if c.detail else ''} |\n")
+    console.print("[bold green]CI GATE PASS[/]" if passed else "[bold red]CI GATE FAIL[/]")
+    if not passed:
+        raise SystemExit(1)
+
+
 def cmd_kill(args) -> None:
     ctx = Ctx(args)
     info = {"by": args.by, "reason": args.reason, "ts": datetime.now(timezone.utc).isoformat(timespec="seconds")}
@@ -630,6 +777,12 @@ def cmd_status(args) -> None:
     if args.wo:
         store = ctx.store(args.wo)
         wo = store.load_wo()
+        ev = ctx.ledger.for_work_order(wo.id)
+        done = {e["data"]["started_seq"] for e in ev if "started_seq" in e["data"]}
+        stuck = [e for e in ev if e["event"] == "session.started" and e["seq"] not in done]
+        if stuck:
+            console.print(f"[yellow]{len(stuck)} agent session(s) never finished (step {', '.join(str(e['seq']) for e in stuck)}). "
+                          f"The next `wo run` recovers them automatically.[/]")
         console.print(f"[bold]{wo.id}[/] {wo.title} — [cyan]{derive_status(ctx, wo.id)}[/] (owner {wo.requester}, "
                       f"spent ${ctx.spent(wo.id):.2f} of ${ctx.policy.max_workorder_budget_usd:.2f})")
         t = Table(); t.add_column("Feature"); t.add_column("Status"); t.add_column("Title"); t.add_column("Sessions")
@@ -701,6 +854,61 @@ def cmd_stats(args) -> None:
     t.add_row("Cost", "Total agent cost", f"${cost:.2f}")
     t.add_row("Cost", "Cost per merged change", f"${cost / max(len(merged), 1):.2f}")
     console.print(t)
+    scorecard(entries)
+
+
+def scorecard(entries: list[dict]) -> None:
+    """Agent scorecard by role and model (idea from Paperclip's agent performance reviews).
+
+    Helps answer: which model should do which job, and is each one worth its cost?
+    """
+    started = {e["seq"]: e for e in entries if e["event"] == "session.started"}
+    closers = [e for e in entries if e["event"] in ("plan.created", "session.completed", "review.completed", "session.failed", "session.abandoned")
+               and e["data"].get("started_seq") in started]
+    gates = [e for e in entries if e["event"] == "gate.result"]
+    rows: dict[tuple[str, str], dict] = {}
+    for c in closers:
+        st = started[c["data"]["started_seq"]]
+        role = st["data"]["role"]
+        model = c["data"].get("model") or st["data"].get("model")
+        r = rows.setdefault((role, model), {"n": 0, "ok": 0, "broken": 0, "cost": 0.0, "denied": 0, "wos": set(), "fix": 0,
+                                            "agree": 0, "reviews": 0, "extra_blocks": 0})
+        r["n"] += 1
+        r["cost"] += c["data"].get("cost_usd", 0) or 0
+        r["denied"] += len(c["data"].get("denials", []))
+        r["wos"].add(c["work_order"])
+        if c["event"] in ("session.failed", "session.abandoned"):
+            r["broken"] += 1
+        else:
+            r["ok"] += 1
+        if c["data"].get("feature") == "FIX":
+            r["fix"] += 1
+        if c["event"] == "review.completed":
+            g = next((g for g in gates if g["work_order"] == c["work_order"] and g["data"]["number"] == c["data"].get("gate")), None)
+            if g:
+                det_failed = bool([x for x in g["data"]["failed"] if x != "independent reviewer agent"])
+                blocked = c["data"].get("result") == "request_changes"
+                r["reviews"] += 1
+                r["agree"] += int(blocked == det_failed)
+                r["extra_blocks"] += int(blocked and not det_failed)
+    first_gate = {}
+    for g in gates:
+        first_gate.setdefault(g["work_order"], g["data"]["passed"])
+    t = Table(title="Agent scorecard (by role and model)")
+    for col in ("Role", "Model", "Sessions (ok / broken)", "Avg cost", "Blocked calls", "Quality signal"):
+        t.add_column(col, overflow="fold")
+    for (role, model), r in sorted(rows.items()):
+        if role == "implementer":
+            wos = [w for w in r["wos"] if w in first_gate]
+            q = (f"first-gate pass {100 * sum(first_gate[w] for w in wos) / max(len(wos), 1):.0f}% over {len(wos)} WO; "
+                 f"{r['fix']} fix session(s)")
+        elif role == "reviewer":
+            q = (f"agreed with tests {r['agree']}/{r['reviews']}; blocked {r['extra_blocks']} time(s) when tests passed "
+                 f"(check: real catch or noise?)")
+        else:
+            q = "—"
+        t.add_row(role, model, f"{r['ok']} / {r['broken']}", f"${r['cost'] / max(r['n'], 1):.2f}", str(r["denied"]), q)
+    console.print(t)
 
 
 def cmd_ledger(args) -> None:
@@ -744,6 +952,8 @@ def main(argv: list[str] | None = None) -> None:
     s = sub.add_parser("provenance", help="FINOS MI-23 provenance check"); s.set_defaults(fn=cmd_provenance); s.add_argument("wo")
     s = sub.add_parser("approve", help="independent human approval"); s.set_defaults(fn=cmd_approve)
     s.add_argument("wo"); s.add_argument("--by", required=True); s.add_argument("--note"); s.add_argument("--merge", action="store_true")
+    s = sub.add_parser("ci", help="re-run the gate in CI on a plain checkout"); s.set_defaults(fn=cmd_ci)
+    s.add_argument("--base", default="origin/main", help="target branch ref (default: origin/main)")
     s = sub.add_parser("kill", help="stop all agent sessions now"); s.set_defaults(fn=cmd_kill)
     s.add_argument("--by", required=True); s.add_argument("--reason", required=True)
     s = sub.add_parser("resume", help="allow agent sessions again (humans only)"); s.set_defaults(fn=cmd_resume)

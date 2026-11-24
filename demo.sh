@@ -4,7 +4,7 @@
 #   ./demo.sh                       replay backend (no network, deterministic) — the backup
 #   WO_BACKEND=claude ./demo.sh     live agents via the Claude Agent SDK
 #   PAUSE=1 ./demo.sh               wait for Enter between steps (for presenting)
-#   ./demo-stop-limit.sh            the "it goes wrong" story: stop limit + hand-back
+#   ./demo-when-it-goes-wrong.sh    crash recovery + stop limit
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DEMO="${DEMO_DIR:-/tmp/wo-demo}"
@@ -49,6 +49,9 @@ wo run WO-001 "${RECORD_ARGS[@]}"
 
 step "8. GATE again"
 wo gate WO-001 "${RECORD_ARGS[@]}"
+
+step "8b. Same gate in CI: GitHub Actions runs this on the PR (no model calls, no secrets)"
+(cd .factory/worktrees/WO-001 && wo --repo . ci --base main)
 
 step "9. PR text with provenance"
 wo pr WO-001 > /dev/null && sed -n "1,25p" .factory/worktrees/WO-001/.factory/WO-001/PR.md
