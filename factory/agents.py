@@ -83,6 +83,8 @@ ROLE_TOOLS = {
     "reviewer": ["Read", "Glob", "Grep"],
 }
 
+OUTPUT_TOOL = "StructuredOutput"  # how the Agent SDK delivers output_format results
+
 ROLE_MODEL_ENV = {"planner": "WO_PLANNER_MODEL", "implementer": "WO_IMPLEMENTER_MODEL", "reviewer": "WO_REVIEWER_MODEL"}
 # The reviewer defaults to a different model from the implementer on purpose: less shared blind spots.
 ROLE_MODEL_DEFAULT = {"planner": "sonnet", "implementer": "sonnet", "reviewer": "opus"}
@@ -184,6 +186,11 @@ class ClaudeBackend:
 
         async def pre_tool(input_data: dict, tool_use_id: str | None, context: Any) -> dict:
             tool, tin = input_data.get("tool_name", ""), input_data.get("tool_input", {})
+            if tool == OUTPUT_TOOL:
+                # The SDK returns the structured final answer through this tool. No side effects: allow, but log it.
+                tool_log.append({"tool": tool, "target": "final structured answer", "allowed": "True"})
+                _live(self.live_log, tool_log[-1])
+                return {}
             if tool not in tools:
                 allowed, reason = False, f"tool '{tool}' not allowed for {role}"
             else:
@@ -202,7 +209,7 @@ class ClaudeBackend:
             cwd=str(cwd),
             model=model,
             tools=tools,
-            allowed_tools=tools,
+            allowed_tools=[*tools, OUTPUT_TOOL],
             permission_mode="dontAsk",
             setting_sources=["project"],  # loads the repo's CLAUDE.md -> AGENTS.md, ignores personal settings
             mcp_servers={},
