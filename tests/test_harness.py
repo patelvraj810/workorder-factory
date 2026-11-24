@@ -458,6 +458,7 @@ def test_init_sets_up_a_node_repo_and_never_overwrites(tmp_path):
     srv = json.loads((r / ".mcp.json").read_text())["mcpServers"]["work-order-factory"]
     assert srv["env"]["WO_REPO"] == str(r) and srv["env"]["WO_USER"] == "vraj"
     assert ".factory/worktrees/" in (r / ".gitignore").read_text()
+    assert "node_modules/" in (r / ".gitignore").read_text()
     # Only the factory's files were committed; the user's other work was left alone.
     committed = gitops.git(r, "show", "--name-only", "--format=", "HEAD").split()
     assert "factory.toml" in committed and "notes.txt" not in committed and "AGENTS.md" not in committed
@@ -474,6 +475,7 @@ def test_init_on_a_plain_folder_makes_a_repo(tmp_path):
     main(["--repo", str(r), "init", "--user", "vraj"])
     assert (r / ".git").exists() and gitops.default_base(r) == "main"
     assert load_policy(r).unit_test_cmd == ""        # 'other' stack: not set up yet
+    assert "__pycache__/" not in (r / ".gitignore").read_text()
 
 
 def test_gate_runs_configured_commands_and_warns_when_not_set_up(tmp_path):

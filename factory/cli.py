@@ -397,6 +397,8 @@ def provenance(ctx: Ctx, wo_id: str) -> tuple[bool, list[dict], list[str]]:
 TEMPLATES = Path(__file__).parent / "templates"
 FACTORY_ROOT = Path(__file__).resolve().parent.parent
 GITIGNORE_LINES = [".factory/worktrees/", ".factory/ledger.jsonl", ".factory/KILL", ".factory/proposals/", ".env"]
+STACK_IGNORES = {"python": ["__pycache__/", "*.pyc", ".pytest_cache/", ".hypothesis/"],
+                 "node": ["node_modules/"], "other": []}
 STACKS = {
     "python": {"unit": "python -m pytest -q tests/", "inv": "python -m pytest -q invariants/",
                "bash": ["python -m pytest", "pytest", "git diff", "git status", "ls", "cat"]},
@@ -463,7 +465,7 @@ def cmd_init(args) -> None:
 
     gi = repo / ".gitignore"
     have = gi.read_text().splitlines() if gi.exists() else []
-    missing = [ln for ln in GITIGNORE_LINES if ln not in have]
+    missing = [ln for ln in GITIGNORE_LINES + STACK_IGNORES[stack] if ln not in have]
     if missing:
         gi.write_text("\n".join(have + ([""] if have and have[-1] else []) + ["# work-order factory"] + missing) + "\n")
         made.append(".gitignore (added factory lines)")
