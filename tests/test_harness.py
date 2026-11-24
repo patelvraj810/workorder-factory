@@ -583,3 +583,13 @@ def test_human_can_add_a_rule_to_an_open_work_order_and_gate_accepts_it(repo, tm
     monkeypatch.setenv("CLAUDECODE", "1")
     with pytest.raises(SystemExit, match="must be done by a human"):
         wo(repo, "rule", "WO-001", str(rule), "--by", "vraj")
+
+
+def test_diff_cap_counts_agent_work_not_human_rules(repo, tmp_path):
+    from factory.gate import check_diff_size
+    wo(repo, "new", "Per-symbol position limits", "--intent", "limits", "--by", "vraj")
+    rule = tmp_path / "test_big_rule.py"
+    rule.write_text("".join(f"def test_{i}():\n    assert True\n" for i in range(200)))   # 400 human lines
+    wo(repo, "rule", "WO-001", str(rule), "--by", "vraj")
+    c = check_diff_size(repo / ".factory" / "worktrees" / "WO-001", "main", load_policy(repo))
+    assert c.passed and "400 human-owned lines not counted" in c.detail

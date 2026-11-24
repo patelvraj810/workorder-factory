@@ -159,10 +159,15 @@ def check_test_config(worktree: Path, base: str) -> Check:
 
 
 def check_diff_size(worktree: Path, base: str, policy: Policy) -> Check:
+    """The cap limits what the AGENT changed. Human-owned files (protected paths, such as the rules in
+    invariants/) are not agent work: they are checked by `protected paths` and need a CODEOWNER instead."""
     rows = [r for r in gitops.diff_numstat(worktree, base) if not r[2].startswith(".factory/")]
-    total = sum(a + r for a, r, _ in rows)
+    human = [r for r in rows if policy.is_protected(r[2])]
+    agent = [r for r in rows if not policy.is_protected(r[2])]
+    total = sum(a + r for a, r, _ in agent)
     ok = total <= policy.max_diff_lines
-    return Check("diff size", ok, f"{total} changed lines in {len(rows)} files (limit {policy.max_diff_lines})")
+    extra = f"; {sum(a + r for a, r, _ in human)} human-owned lines not counted" if human else ""
+    return Check("diff size", ok, f"{total} changed lines in {len(agent)} files (limit {policy.max_diff_lines}){extra}")
 
 
 def _added_lines(diff: str) -> list[tuple[str, str]]:
