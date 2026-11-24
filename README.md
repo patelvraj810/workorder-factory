@@ -51,7 +51,7 @@ pip install -e .
 ./demo-when-it-goes-wrong.sh  # crash recovery + stop limit
 PAUSE=1 ./demo.sh             # step through it while presenting
 python -m pytest -q tests/    # 38 harness tests, including the gate evals
-python evals/run_evals.py     # 9 agent failure modes the gate must catch
+python evals/run_evals.py     # 10 agent failure modes the gate must catch
 ```
 
 ### Live agents (Claude Agent SDK)
@@ -98,7 +98,7 @@ factory/prompts/    planner / implementer / reviewer prompts (the hand-off proto
 sample_repo/        synthetic order-validation service (target), with AGENTS.md, factory.toml, CODEOWNERS,
                     catalog-info.yaml, invariants/, .github/workflows/factory-gate.yml
 replays/WO-001/     recorded agent outputs for the demo story + the human-written invariant
-evals/              gate eval suite (9 failure modes)
+evals/              gate eval suite (10 failure modes)
 tests/              harness tests (38)
 docs/               DESIGN.md, MCP.md
 ```

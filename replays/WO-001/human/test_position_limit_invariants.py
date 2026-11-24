@@ -61,3 +61,24 @@ def test_inv_limit_3_no_limit_configured_means_no_limit_rejections(pos, qty, sd)
 def test_inv_limit_4_exactly_at_limit_is_allowed():
     r = validate_order(Order(SYMBOL, Side.BUY, Decimal("0.20"), PRICE), make(Decimal("0.10"), Decimal("0.30")))
     assert r.accepted
+
+
+@settings(max_examples=800, deadline=None)
+@given(position, lot_qty, side, limit)
+def test_inv_limit_5_a_flip_never_opens_new_exposure_beyond_the_limit(pos, qty, sd, lim):
+    """Crossing zero closes the old position and OPENS a new one. The new side must be within the limit.
+
+    Business rule decided by the requester after the first live run, where the reviewer agent found
+    that an over-limit account could flip from +300 to -300 (3x the limit).
+    """
+    order = Order(SYMBOL, sd, qty, PRICE)
+    new_pos = pos + signed_qty(order)
+    assume(pos != 0 and new_pos != 0 and (pos > 0) != (new_pos > 0))
+    r = validate_order(order, make(pos, lim))
+    if r.accepted:
+        assert abs(new_pos) <= lim
+
+
+def test_inv_limit_6_flip_landing_exactly_on_the_limit_is_allowed():
+    r = validate_order(Order(SYMBOL, Side.SELL, Decimal("15.00"), PRICE), make(Decimal("5.00"), Decimal("10.00")))
+    assert r.accepted

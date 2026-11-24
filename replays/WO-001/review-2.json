@@ -8,14 +8,14 @@
   },
   "output": {
     "verdict": "approve",
-    "summary": "Direction-aware check is correct for all cases I traced, including over-limit reduction and flips. Tests now cover both sides.",
+    "summary": "Correct for every case I traced: BUY and SELL, long and short, at the limit, already over the limit, and flips through zero, which are judged by the new opposite position as invariants 5 and 6 require. Tests now cover both sides.",
     "findings": [
       {
         "severity": "low",
         "file": "orders/validation.py",
-        "issue": "Flip rule (long to short) is a business decision, not only code. The implementer flagged it too.",
-        "failing_input": "",
-        "suggestion": "Human reviewer: confirm the flip rule with the trading team."
+        "issue": "Pre-existing, not from this diff: the margin check can still reject an order that closes a position, which conflicts with AGENTS.md rule 5. The implementer flagged it too.",
+        "failing_input": "free_margin=10, position +5 XAUUSD, SELL 5 -> INSUFFICIENT_MARGIN",
+        "suggestion": "Human: open a separate work order with an invariant for it."
       }
     ]
   }

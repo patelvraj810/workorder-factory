@@ -9,17 +9,19 @@
   "output": {
     "feature_id": "FIX",
     "status": "done",
-    "summary": "Limit check now uses signed new position; reducing orders are never blocked",
+    "summary": "Limit check now uses the signed new position; reducing never blocked; a flip must fit the limit on its new side",
     "tests_added": [
       "test_sell_reducing_long_never_blocked",
       "test_reducing_allowed_when_already_over_limit",
       "test_buy_reducing_short_never_blocked",
       "test_sell_increasing_short_beyond_limit_rejected",
-      "test_flip_long_to_short_beyond_limit_rejected"
+      "test_flip_long_to_short_beyond_limit_rejected",
+      "test_flip_from_over_limit_cannot_open_a_big_opposite_position",
+      "test_flip_landing_exactly_on_the_limit_allowed"
     ],
-    "notes_for_next_session": "Gate 1 failures fixed: direction-aware check plus 5 tests for SELL/short/over-limit/flip. Ran unit tests (16 pass) and invariants (7 pass). Ready for gate.",
+    "notes_for_next_session": "Gate 1 failures fixed: direction-aware check, flips judged by the new opposite position (invariants 5 and 6), 7 new tests. Ran unit tests (18 pass) and invariants (9 pass). Ready for gate.",
     "concerns": [
-      "A flip from long to short is checked against the new absolute position only. Confirm with the trading team that this is the intended rule."
+      "The existing margin check can still reject an order that closes a position (AGENTS.md rule 5). Pre-existing and out of scope for this work order; flagging it for a human."
     ]
   }
 }

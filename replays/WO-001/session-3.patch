@@ -1,15 +1,17 @@
 diff --git a/orders/validation.py b/orders/validation.py
-index cf686a0..e8edc9e 100644
+index cf686a0..ff8ee41 100644
 --- a/orders/validation.py
 +++ b/orders/validation.py
-@@ -27,11 +27,19 @@ def required_margin(order: Order) -> Decimal:
+@@ -27,11 +27,24 @@ def required_margin(order: Order) -> Decimal:
  
  
  def _breaches_position_limit(order: Order, account: Account) -> bool:
-+    """True only if the order INCREASES exposure beyond the limit.
++    """True only if the order OPENS exposure beyond the limit.
 +
-+    Orders that reduce or close a position are never blocked, even when the
-+    account is already over its limit (e.g. after the limit was lowered).
++    - Reducing or closing a position is never blocked, even when the account is already
++      over its limit (e.g. after the limit was lowered).
++    - A flip through zero closes the old position and opens a new one on the other side:
++      the new side must fit within the limit (business rule from the work-order owner).
 +    """
      limit = account.position_limits.get(order.symbol)
      if limit is None:
@@ -17,6 +19,9 @@ index cf686a0..e8edc9e 100644
      current = account.positions.get(order.symbol, Decimal("0"))
 -    return abs(current) + order.qty > limit
 +    new_position = current + signed_qty(order)
++    crosses_zero = current != 0 and new_position != 0 and (current > 0) != (new_position > 0)
++    if crosses_zero:
++        return abs(new_position) > limit
 +    if abs(new_position) <= abs(current):
 +        return False
 +    return abs(new_position) > limit
@@ -24,10 +29,10 @@ index cf686a0..e8edc9e 100644
  
  def validate_order(order: Order, account: Account) -> ValidationResult:
 diff --git a/tests/test_validation.py b/tests/test_validation.py
-index f9028e6..a76d12e 100644
+index f9028e6..052521e 100644
 --- a/tests/test_validation.py
 +++ b/tests/test_validation.py
-@@ -66,3 +66,28 @@ def test_buy_beyond_limit_rejected():
+@@ -66,3 +66,38 @@ def test_buy_beyond_limit_rejected():
  def test_buy_exactly_to_limit_accepted():
      r = validate_order(Order("XAUUSD", Side.BUY, D("10.00"), D("2400.00")), limited("10", "20"))
      assert r.accepted
@@ -56,3 +61,13 @@ index f9028e6..a76d12e 100644
 +def test_flip_long_to_short_beyond_limit_rejected():
 +    r = validate_order(Order("XAUUSD", Side.SELL, D("35.00"), D("2400.00")), limited("10", "20"))
 +    assert r.reason is Reason.POSITION_LIMIT
++
++
++def test_flip_from_over_limit_cannot_open_a_big_opposite_position():
++    r = validate_order(Order("XAUUSD", Side.SELL, D("600.00"), D("2400.00")), limited("300", "100"))
++    assert r.reason is Reason.POSITION_LIMIT
++
++
++def test_flip_landing_exactly_on_the_limit_allowed():
++    r = validate_order(Order("XAUUSD", Side.SELL, D("15.00"), D("2400.00")), limited("5", "10"))
++    assert r.accepted

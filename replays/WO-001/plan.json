@@ -31,6 +31,8 @@
     "risks": [
       "Sign handling: SELL reduces a long position; a check on abs(position) + qty would block traders from closing positions.",
       "Accounts already over a newly lowered limit must still be able to reduce exposure.",
+      "Flips through zero (long to short in one order) are neither plain reductions nor plain increases; the new opposite side must fit the limit (invariants 5 and 6).",
+      "The existing margin check runs on every order, so a reducing order can still be rejected for INSUFFICIENT_MARGIN. Pre-existing; conflicts with AGENTS.md rule 5. Flag for a human, do not change silently.",
       "Do not use float when comparing Decimal quantities to the limit."
     ]
   }

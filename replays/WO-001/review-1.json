@@ -8,7 +8,7 @@
   },
   "output": {
     "verdict": "request_changes",
-    "summary": "The limit check ignores order direction. It blocks orders that reduce a position, which can stop a trader from closing risk. Tests only cover BUY.",
+    "summary": "The limit check ignores order direction. It blocks orders that reduce a position, which can stop a trader from closing risk, and it rejects a flip that lands exactly on the limit. Tests only cover BUY.",
     "findings": [
       {
         "severity": "high",

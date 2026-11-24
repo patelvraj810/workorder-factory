@@ -97,19 +97,27 @@ carries little risk. The factory is for changes that reach production, not for h
 
 | Step | Who | What happens | Human time |
 |---|---|---|---|
-| 1 | **Vraj (engineer)** | Writes intent and a property test: *"a trader can always reduce a position, even when over the limit"*. Runs `wo new`. The test is committed **as Vraj**, before any agent runs | ~15 min |
+| 1 | **Vraj (engineer)** | Writes intent and property tests: *"a trader can always reduce a position, even when over the limit"* and *"a flip through zero must fit the limit on its new side"*. Runs `wo new`. The tests are committed **as Vraj**, before any agent runs | ~15 min |
 | 2 | Planner agent | Reads code + invariant. Splits into F1 (model) and F2 (check). Flags the risk: *"abs(position)+qty would block closing"* | 0 (Vraj skims plan: 1 min) |
 | 3 | Implementer, session 1 | Fresh context. Reads progress.md. Does F1. Writes notes for the next session | 0 |
 | 4 | Implementer, session 2 | New session, no memory. Picks up from files. Does F2. **Writes `abs(position) + qty`** and tests only BUY. Its 11 tests pass | 0 |
 | 5 | Gate 1 | **FAIL.** Hypothesis finds: long 0.51, limit 1.00, SELL 0.50 → blocked. Reviewer agent independently flags the same bug + missing SELL tests | 0 |
-| 6 | Implementer, session 3 | Fix mode: gets the gate report as its task. Uses signed position. Adds 5 tests | 0 |
-| 7 | Gate 2 | **PASS** on commit `a9e4…`. Reviewer: approve, with one note — "the long→short flip rule is a business decision" | 0 |
+| 6 | Implementer, session 3 | Fix mode: gets the gate report as its task. Uses the signed new position; judges flips by the new side. Adds 7 tests | 0 |
+| 7 | Gate 2 | **PASS**. Reviewer: approve, with one note: the old margin check can still block a trader from closing (pre-existing, needs its own work order) | 0 |
 | 8 | Factory | Writes PR.md: intent, features, sessions, cost ($1.53), gate, ledger head | 0 |
 | 9 | Vraj | Tries to approve his own change → **refused** and logged | — |
-| 10 | **Priya (trading lead, CODEOWNER)** | Reviews a 75-line, gated diff. Confirms flip rule with trading. The factory checks the gate is still current and that every agent commit has a provenance record. Approves → merge commit carries `Approved-By`, `Accountable-Owner`, gate SHA, provenance, ledger hash | ~10 min |
+| 10 | **Priya (trading lead, CODEOWNER)** | Reviews a ~85-line, gated diff (code + tests). Confirms the flip rule with trading. The factory checks the gate is still current and that every agent commit has a provenance record. Approves → merge commit carries `Approved-By`, `Accountable-Owner`, gate SHA, provenance, ledger hash | ~10 min |
 
 The bug in step 4 is the exact thing the senior engineer described: *plausible code that quietly
 breaks an invariant*. No human had to find it.
+
+**The same change, with live agents** (`evidence/live-run-1/`, $0.70, 21 minutes). The live agents
+got the direction right first time, and all 8 automatic checks passed. **The independent reviewer
+still failed it**: an account over its limit (+300, limit 100) could sell 600 and flip to −300, three
+times the limit, because "reducing" was judged by size alone. No test covered flips. I decided the
+business rule ("a flip must fit the limit on its new side"), wrote it as an invariant, and the fix
+session made the code follow it. My own first scripted answer had the same flaw. That is the
+delegate / review / own line from §5 working for real: the agent found it, the human decided it.
 
 ### 3b. Deep dive — the gate, and why the agent that writes the code must never grade it
 
@@ -138,12 +146,13 @@ wrong way. So I treat the gate as a security boundary and threat-model it like o
 | 16 | Someone skips the factory | Pushes agent code straight to a PR | **Same gate in CI**: `wo ci` re-runs the deterministic checks on the PR, checks every agent commit has provenance trailers, and checks the recorded gate matches the code | ✅ (workflow file; not run on GitHub here) |
 | 14 | Agent approves via its tools | Agent in Claude Code calls an "approve" tool | The MCP server has no approve, merge or resume tool. Agents can stop things, never start them again | ✅ |
 
-**Measured:** `evals/run_evals.py` runs 9 of these as seeded agent changes. 9/9 caught, and the correct
+**Measured:** `evals/run_evals.py` runs 10 of these as seeded agent changes, including the flip
+loophole found in the live run. 10/10 caught, and the correct
 implementation passes (no false positive). Every new escape we find becomes an eval case first.
 
 **Order matters:** cheap deterministic checks first, the reviewer agent last. Deterministic checks are
 free, repeatable, and can't be argued with. The reviewer is for what rules can't express
-("this flip rule is a business decision").
+("this flip lets an over-limit account open a big opposite position", found live).
 
 **Honest gap:** the gate is only as good as the invariants. If nobody writes the invariant that matters,
 the gate passes bad code with a green tick — which is worse than no tick. That is why §8 puts so much
