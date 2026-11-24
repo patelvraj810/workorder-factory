@@ -7,6 +7,7 @@
 #   ./demo-when-it-goes-wrong.sh    crash recovery + stop limit
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"   # find the factory code even if the editable install is skipped
 DEMO="${DEMO_DIR:-/tmp/wo-demo}"
 export WO_BACKEND="${WO_BACKEND:-replay}"
 export WO_REPLAY_DIR="${WO_REPLAY_DIR:-$HERE/replays/WO-001}"

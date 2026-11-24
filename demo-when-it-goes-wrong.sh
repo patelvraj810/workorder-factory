@@ -4,6 +4,7 @@
 #   B. the agent keeps failing the gate                   -> stop limit: hand back, no PR
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"   # find the factory code even if the editable install is skipped
 DEMO="${DEMO_DIR:-/tmp/wo-demo-wrong}"
 export WO_BACKEND=replay WO_REPLAY_DIR="$HERE/replays/WO-001"
 step() { echo; echo -e "\033[1;35m━━ $* ━━\033[0m"; if [[ "${PAUSE:-0}" == "1" ]]; then read -r -p "(enter)"; fi; }
