@@ -9,6 +9,7 @@ the gate ran, the approval is refused until the gate runs again.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -92,7 +93,8 @@ def run_test_command(worktree: Path, cmd: str, invariants: bool) -> tuple[str, s
         if invariants:
             argv.append("--noconftest")
     try:
-        p = subprocess.run(argv, cwd=worktree, capture_output=True, text=True, timeout=900)
+        p = subprocess.run(argv, cwd=worktree, capture_output=True, text=True, timeout=900,
+                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     except FileNotFoundError:
         return "fail", f"command not found: {argv[0]} (check [gate] in factory.toml)"
     out = (p.stdout + p.stderr).strip()
@@ -132,7 +134,9 @@ def check_protected(worktree: Path, base: str, policy: Policy) -> Check:
     bad, human = [], []
     for path in touched:
         for c in gitops.commits_touching(worktree, base, path):
-            if _is_agent(c["author_email"]) or "Change-Type: human-invariant" not in c["body"]:
+            # Agents can't commit (no `git commit` on their allow-list); the factory commits their work as the
+            # agent identity. So any other author is a person, whose change needs a CODEOWNER's review.
+            if _is_agent(c["author_email"]):
                 bad.append(f"{path} in {c['sha'][:8]} by {c['author_email']}")
             else:
                 human.append(f"{path} ({c['author_email']})")

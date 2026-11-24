@@ -39,6 +39,25 @@ def commit(cwd: Path, message: str, author_name: str, author_email: str, trailer
     return git(cwd, "rev-parse", "HEAD")
 
 
+CACHE_PATTERNS = ["__pycache__/", "*.pyc", ".pytest_cache/", ".hypothesis/", "node_modules/.cache/"]
+
+
+def exclude_caches(repo: Path) -> None:
+    """Tell git (for the repo and every work-order copy) to ignore test/tool caches.
+
+    Running tests leaves cache folders behind. Without this, the factory commits them as agent work,
+    or refuses to continue because "uncommitted changes no agent owns" appeared out of nowhere.
+    Uses .git/info/exclude, so the project's own .gitignore is never touched.
+    """
+    common = Path(git(repo, "rev-parse", "--git-common-dir"))
+    excl = (common if common.is_absolute() else repo / common) / "info" / "exclude"
+    excl.parent.mkdir(parents=True, exist_ok=True)
+    have = excl.read_text().splitlines() if excl.exists() else []
+    missing = [p for p in CACHE_PATTERNS if p not in have]
+    if missing:
+        excl.write_text("\n".join(have + ["# work-order factory: tool caches"] + missing) + "\n")
+
+
 def default_base(repo: Path) -> str:
     """The branch work orders start from: main, else master, else whatever is checked out."""
     for name in ("main", "master"):

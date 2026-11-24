@@ -556,3 +556,30 @@ def test_init_refuses_folder_names_with_edge_spaces(tmp_path):
     with pytest.raises(SystemExit, match="starts or ends with a space"):
         main(["--repo", str(r), "init", "--user", "vraj"])
     assert not (r / "factory.toml").exists()
+
+
+def test_cache_folders_never_block_or_get_committed(repo):
+    wo(repo, "new", "Per-symbol position limits", "--intent", "limits", "--by", "vraj")
+    wt = repo / ".factory" / "worktrees" / "WO-001"
+    (wt / "invariants" / "__pycache__").mkdir()
+    (wt / "invariants" / "__pycache__" / "x.cpython-312.pyc").write_bytes(b"\0")
+    assert gitops.git(wt, "status", "--porcelain") == ""             # ignored, so nothing "uncommitted"
+    wo(repo, "plan", "WO-001")                                         # no refusal
+    assert "__pycache__" not in gitops.git(wt, "ls-files")
+
+
+def test_human_can_add_a_rule_to_an_open_work_order_and_gate_accepts_it(repo, tmp_path, monkeypatch):
+    from factory.gate import check_protected
+    wo(repo, "new", "Per-symbol position limits", "--intent", "limits", "--by", "vraj")
+    rule = tmp_path / "test_my_rule.py"; rule.write_text("def test_ok():\n    assert True\n")
+    wo(repo, "rule", "WO-001", str(rule), "--by", "vraj")
+    wt = repo / ".factory" / "worktrees" / "WO-001"
+    assert (wt / "invariants" / "test_my_rule.py").exists()
+    # A plain human commit (no marker) also counts as human-owned; only agent commits fail.
+    (wt / "invariants" / "test_more.py").write_text("def test_more():\n    assert True\n")
+    gitops.git(wt, "-c", "user.name=vraj", "-c", "user.email=vraj@example.com", "add", "-A")
+    gitops.git(wt, "-c", "user.name=vraj", "-c", "user.email=vraj@example.com", "commit", "-qm", "my rule")
+    assert check_protected(wt, "main", load_policy(repo)).passed
+    monkeypatch.setenv("CLAUDECODE", "1")
+    with pytest.raises(SystemExit, match="must be done by a human"):
+        wo(repo, "rule", "WO-001", str(rule), "--by", "vraj")

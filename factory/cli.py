@@ -194,6 +194,7 @@ class Ctx:
         recovered = {e["data"]["started_seq"] for e in events if e["event"] == "workorder.recovered"}
         broken = [s for s in started if s["seq"] in closed and closed[s["seq"]]["event"] == "session.failed"
                   and s["seq"] not in recovered]
+        gitops.exclude_caches(wt)  # also covers work orders opened before this existed
         dirty = gitops.git(wt, "status", "--porcelain")
         if not orphans and not broken:
             if dirty:
@@ -519,6 +520,7 @@ def cmd_new(args) -> None:
     wo_id = f"WO-{n:03d}"
     branch = f"wo/{wo_id}"
     wt = ctx.worktree(wo_id)
+    gitops.exclude_caches(ctx.repo)
     gitops.git(ctx.repo, "worktree", "add", "-q", "-b", branch, str(wt), args.base)
 
     inv_paths = []
@@ -544,6 +546,35 @@ def cmd_new(args) -> None:
                       invariants={p: sha256_file(wt / p) for p in inv_paths})
     console.print(f"[bold green]Opened {wo_id}[/] on branch [cyan]{branch}[/] (sandbox: {wt.relative_to(ctx.repo)})")
     console.print(f"Next: [bold]wo plan {wo_id}[/]")
+
+
+def cmd_rule(args) -> None:
+    """Add a human-owned rule (invariant test) to an open work order. Humans only."""
+    ctx = Ctx(args)
+    store = ctx.store(args.wo)
+    wo = store.load_wo()
+    human_only(ctx, "add human-owned invariants", args.by, wo.id)
+    if derive_status(ctx, wo.id) in ("approved", "merged"):
+        raise SystemExit(f"{wo.id} is already approved. Add the rule to a new work order.")
+    wt = ctx.worktree(wo.id)
+    src = Path(args.file).resolve()
+    if not src.is_file():
+        raise SystemExit(f"No such file: {src}")
+    dest = wt / "invariants" / src.name
+    dest.parent.mkdir(exist_ok=True)
+    shutil.copy(src, dest)
+    rel = f"invariants/{src.name}"
+    gitops.git(wt, "add", "--", rel)
+    gitops.git(wt, "-c", f"user.name={gitops.FACTORY_NAME}", "-c", f"user.email={gitops.FACTORY_EMAIL}",
+               "commit", "-q", "--author", f"{args.by} <{gitops.human_email(args.by)}>",
+               "-m", f"{wo.id}: add human-owned rule {src.name}\n\nWork-Order: {wo.id}\nChange-Type: human-invariant",
+               "--", rel)
+    sha = gitops.head(wt)
+    ctx.ledger.append("invariant.added", wo.id, args.by, path=rel, sha256=sha256_file(dest), commit=sha,
+                      channel=ctx.channel)
+    console.print(f"[bold green]Rule added[/] to {wo.id}: {rel} (commit {sha[:10]}, by {args.by}).")
+    console.print(f"Next: [bold]wo gate {wo.id}[/]. If the code breaks your rule, the gate fails and the next "
+                  f"`wo run` fixes the code (agents can never edit the rule).")
 
 
 def cmd_plan(args) -> None:
@@ -1107,6 +1138,8 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("title"); s.add_argument("--intent", required=True); s.add_argument("--by", required=True)
     s.add_argument("--invariant", action="append", help="human-written invariant test file (repeatable)")
     s.add_argument("--base", help="branch to start from (default: main, else master, else current)")
+    s = sub.add_parser("rule", help="add a human-owned rule to an open work order (humans only)")
+    s.set_defaults(fn=cmd_rule); s.add_argument("wo"); s.add_argument("file"); s.add_argument("--by", required=True)
     s = sub.add_parser("plan", help="planner agent splits the work"); s.set_defaults(fn=cmd_plan); s.add_argument("wo"); agent_opts(s)
     s = sub.add_parser("run", help="one implementer session"); s.set_defaults(fn=cmd_run); s.add_argument("wo"); agent_opts(s)
     s = sub.add_parser("gate", help="checks + reviewer agent"); s.set_defaults(fn=cmd_gate); s.add_argument("wo"); agent_opts(s)
