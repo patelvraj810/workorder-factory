@@ -547,3 +547,10 @@ def test_missing_test_folder_is_a_warning_not_a_failure(tmp_path):
     from factory.gate import check_tests
     c = check_tests(tmp_path, "unit tests", "python -m pytest -q tests/", invariants=False)
     assert not c.passed and not c.blocking
+
+
+def test_init_refuses_folder_names_with_edge_spaces(tmp_path):
+    r = tmp_path / "test-project "; r.mkdir()
+    with pytest.raises(SystemExit, match="starts or ends with a space"):
+        main(["--repo", str(r), "init", "--user", "vraj"])
+    assert not (r / "factory.toml").exists()

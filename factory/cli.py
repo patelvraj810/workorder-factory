@@ -430,6 +430,11 @@ def cmd_init(args) -> None:
     repo = Path(args.repo).resolve()
     if not repo.is_dir():
         raise SystemExit(f"No such folder: {repo}")
+    odd = [part for part in repo.parts if part != part.strip()]
+    if odd:
+        raise SystemExit(f"The folder name {odd[0]!r} starts or ends with a space. AI agents tend to drop that "
+                         f"space when they write file paths, so every write gets refused. Rename the folder "
+                         f"(for example to {odd[0].strip().replace(' ', '-')!r}) and run wo init again.")
     if not (repo / ".git").exists():
         gitops.git(repo, "init", "-q", "-b", "main")
     user = args.user or gitops.git(repo, "config", "user.name", check=False) or os.environ.get("USER", "")
