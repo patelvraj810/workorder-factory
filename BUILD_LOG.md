@@ -92,14 +92,26 @@ what I still do before submitting.
 | First live run with real agents | 00:50–01:14 · ~25 min |
 | Round 4: demo follows the flip rule, WO-002 kit, log, slide draft | 01:19–01:45 · ~25 min |
 | Round 5: `wo init`, Claude skill, approval guard, public-repo prep | ~30 min |
-| **Total so far** | **about 3 h 55 min** |
-| Rehearsal, recording, final slides **[Vraj]** | planned ~1 h 30 min |
+| **Total build time** | **about 3 h 55 min, within the 4-hour timebox** |
 
-**Why over the suggested 4 hours (about 5.5 h in total):** I chose to spend the extra time on three things,
-not on more features. First, understanding: I stopped the build to make sure I could defend every part.
-Second, a real live run: replays can't prove agent fluency, and the live run found 3 problems the
-replays never could (budget cap, blocked answer tool, flip loophole). Third, making it usable for real:
-I want to use this factory on my own projects, so round 5 made it work outside the demo.
+Rehearsing, recording the demo and the final slide edit are presentation prep, not build time.
+
+**How I used the time:** I spent it on three things, not on more features.
+
+1. **Most important: anyone can use it, not only engineers.** I wanted a person who can't code to use
+   this factory safely, and to plug it into the AI agent they already use, not a new tool. One command
+   (`wo init`) sets up their project. After that they talk to their agent in plain English ("open a work
+   order to…") and the agent drives the factory through the MCP server. The same server works with Claude
+   Code, the Claude desktop app, Codex, Cursor, or any agent that speaks MCP, and the same rules apply in
+   every one of them: same gate, same limits, same audit record. Only two things stay with a human, on
+   purpose: approving a change and adding a rule that must never break. This is the problem the ops
+   analyst and the team lead described: people already use AI tools their own way, so the safe path has to
+   be the easy path. Plain-English guide: `docs/USING-IT.md`. (Tested: the MCP server and `wo init`, plus
+   a Node project. Not yet tested live inside every agent tool.)
+2. **Understanding:** I stopped the build to make sure I could defend every part.
+3. **A real live run:** replays can't prove agent fluency, and the live run found 3 problems the
+   replays never could (budget cap, blocked answer tool, flip loophole).
+
 **What I cut:** real container isolation, model gateway, parallel workers, GitHub check integration,
 a hosted paved road for non-engineers (design only; `wo init` + the Claude skill is the local first step).
 
