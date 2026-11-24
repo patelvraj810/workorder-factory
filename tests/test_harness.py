@@ -513,3 +513,17 @@ def test_mcp_path_starts_agents_but_still_refuses_human_only(monkeypatch):
     assert "CLAUDECODE" not in seen and seen["WO_CHANNEL"] == "mcp"
     monkeypatch.delenv("CLAUDECODE"); monkeypatch.setenv("WO_CHANNEL", "mcp")
     assert agent_session_marker() == "WO_CHANNEL=mcp"
+
+
+def test_hook_allows_checked_writes_explicitly_and_denies_the_rest(tmp_path):
+    from factory.agents import hook_decision
+    pol = load_policy(Path(__file__).resolve().parent.parent / "sample_repo")
+    wt = tmp_path / "proj with space " / "wt"; wt.mkdir(parents=True)
+    ok, why = guard("Write", {"file_path": str(wt / "src" / "tip.py")}, wt, pol)
+    assert ok
+    assert hook_decision("Write", ok, why)["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert hook_decision("Read", True, "") == {}            # reads keep the normal permission rules
+    bad, why = guard("Write", {"file_path": str(wt / ".git")}, wt, pol)
+    assert not bad and hook_decision("Write", bad, why)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    out, why = guard("Edit", {"file_path": str(tmp_path / "elsewhere.py")}, wt, pol)
+    assert not out and "outside" in why
