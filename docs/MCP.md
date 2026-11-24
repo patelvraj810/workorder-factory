@@ -15,7 +15,8 @@ the same `wo` command a human would run: same guard, same gate, same ledger, sam
 | `wo_status`, `wo_provenance`, `wo_stats`, `wo_ledger_verify` | Read-only views | |
 | `wo_kill` | Stop all agent sessions | Stopping is always allowed |
 
-**Not exposed, on purpose:** approve, merge, resume, adding invariants. Those stay with humans in a terminal.
+**Not exposed, on purpose:** approve, merge, resume, adding invariants, accepting reviewer findings,
+changing the project rules. Those stay with humans, in the dashboard (`wo ui`) or a terminal.
 And if an agent tries the CLI instead (`wo approve` in its own shell), the CLI refuses when it
 detects an agent session (`CLAUDECODE`, `AI_AGENT` and similar markers, or `WO_CHANNEL=mcp`) and
 logs a `human_only.refused` event.

@@ -13,7 +13,7 @@ record (FINOS MI-23). A different human approves. Production deploy stays in the
 |---|---|---|
 | **Reviewing the case study** | This page → [`docs/DESIGN.md`](docs/DESIGN.md) (the 9 questions) → [`evidence/live-run-1/`](evidence/live-run-1/README.md) (a real run with live agents) → [`BUILD_LOG.md`](BUILD_LOG.md) → [`WOULD-NOT-SHIP.md`](WOULD-NOT-SHIP.md) | 20 min |
 | **An engineer who wants to try it** | [Run it](#run-it) below: `./demo.sh` runs offline, no account needed. Then [`docs/MCP.md`](docs/MCP.md) for Claude Code, Cursor or Codex | 10 min |
-| **Not technical, want to use it on your own project** | [`docs/USING-IT.md`](docs/USING-IT.md): one-time setup, then you just ask Claude in plain English | 10 min setup |
+| **Not technical, want to use it on your own project** | [`docs/USING-IT.md`](docs/USING-IT.md): one-time setup, then you ask Claude in plain English and watch it in the dashboard (`wo ui`) | 10 min setup |
 
 ## What it shows
 
@@ -34,6 +34,9 @@ wo approve WO-001 --by priya --merge    # checks gate + provenance, merges with 
 wo ci --base main  # same gate in CI (GitHub Actions workflow in sample_repo/.github/)
 wo ledger verify   # hash chain + signatures
 wo stats           # flow, quality, control, cost + agent scorecard by role and model
+wo ui              # dashboard: see everything live, approve / add rules / stop with buttons
+wo rules           # this project's rules in plain English; change them (humans only)
+wo accept WO-001 --finding 1 --reason "..." --by priya   # overrule a reviewer opinion, on record
 ```
 
 The bug the gate catches is real and typical: the agent's position-limit check used
@@ -56,7 +59,7 @@ pip install -e .
 ./demo.sh                     # main story, replay backend — deterministic, the demo backup
 ./demo-when-it-goes-wrong.sh  # crash recovery + stop limit
 PAUSE=1 ./demo.sh             # step through it while presenting
-python -m pytest -q tests/    # 54 harness tests, including the gate evals
+python -m pytest -q tests/    # 59 harness tests, including the gate evals
 python evals/run_evals.py     # 10 agent failure modes the gate must catch
 ```
 
@@ -73,8 +76,10 @@ the exact red→green story every time. That's fine: the gate is the point.
 ### On your own project
 ```bash
 cd /path/to/your/project
-wo init --user YOUR_NAME      # adds factory.toml, AGENTS.md, invariants/, .mcp.json, a Claude skill
+wo init --user YOUR_NAME --preset normal   # practice | normal | money-critical
+wo ui                                      # the dashboard opens in your browser
 ```
+`wo init` adds factory.toml, AGENTS.md, invariants/, .mcp.json and a Claude skill.
 Then open the folder in Claude Code and ask: *"Open a work order to …"*. Python is set up for
 you; for Node or anything else, set the test commands under `[gate]` in `factory.toml`.
 Full guide, including the Claude desktop app: [`docs/USING-IT.md`](docs/USING-IT.md).
@@ -87,6 +92,7 @@ Full guide, including the Claude desktop app: [`docs/USING-IT.md`](docs/USING-IT
 | Sandbox | One git worktree per work order; guard blocks writes outside it, to protected paths, secrets, and non-allow-listed commands | **No OS isolation.** A test file can run any Python. Production: container per session, no network, no real credentials |
 | Gate | All 9 checks run for real: invariants (Hypothesis), unit tests, bandit, secret scan, diff cap, protected paths, test-config tamper, domain lint, reviewer agent | Reviewer verdicts in the demo are replays |
 | Provenance & ledger | FINOS MI-23 fields per agent step, written **before** the agent starts (fail closed); hash chain; HMAC signatures | Local file + shared-secret HMAC. Production: write-once storage + KMS/Sigstore signing |
+| Dashboard | `wo ui`: work orders, plain-English timeline, checks, reviewer findings, cost, live tool calls; buttons for the human-only steps; rule presets. Every button runs the same `wo` command | Local only (127.0.0.1 + token). Read-only if an AI starts it. No team hosting or SSO yet |
 | Approval | Approver ≠ requester, gate pinned to commit, provenance checked before merge. `wo approve`, `wo resume` and adding invariants are **refused inside an AI agent session** (and the attempt is logged) | `--by` is a flag, and the agent-session check is a speed bump: an agent could unset the markers. Production: SSO identity + branch protection + required CODEOWNER review on the Git host |
 | Stop controls | Kill switch (`wo kill` + `factory.toml`), 3-failed-gates stop limit, per-session and per-work-order budgets | — |
 | Crash recovery | Real hard kill (`os._exit`) tested; leftovers kept as evidence; tool calls logged to disk as they happen | Crash is simulated with `WO_SIMULATE_CRASH` |
@@ -116,13 +122,14 @@ One repo, on purpose: the factory and the sample project it works on are shown t
 factory/            wo CLI: cli.py, agents.py (backends + guard), gate.py, ledger.py, workorder.py, policy.py, mcp_server.py
 factory/prompts/    planner / implementer / reviewer prompts (the hand-off protocol)
 factory/templates/  what `wo init` writes into your project (factory.toml, AGENTS.md, Claude skill, …)
+factory/ui.py       the `wo ui` dashboard (server); factory/ui_static/ the page
 sample_repo/        synthetic order-validation service (target), with AGENTS.md, factory.toml, CODEOWNERS,
                     catalog-info.yaml, invariants/, .github/workflows/factory-gate.yml
 replays/WO-001/     recorded agent outputs for the demo story + the human-written invariant
 evals/              gate eval suite (10 failure modes)
-tests/              harness tests (54)
+tests/              harness tests (59)
 evidence/           live run with real agents (logs, ledger, reviewer finding)
-docs/               DESIGN.md (the 9 questions), MCP.md, USING-IT.md (plain-English guide)
+docs/               DESIGN.md (the 9 questions + dashboard and integrations, §8b), MCP.md, USING-IT.md
 ```
 
 ## License

@@ -15,7 +15,8 @@ class Policy:
     max_session_budget_usd: float = 1.50
     allowed_bash: list[str] = field(default_factory=list)
     require_independent_approver: bool = True
-    blocking_severity: str = "high"
+    blocking_severity: str = "high"  # low | medium | high | off (reviewer advises, never blocks)
+    preset: str = ""
     kill_switch: bool = False
     max_gate_failures: int = 3
     max_workorder_budget_usd: float = 5.00
@@ -79,6 +80,7 @@ def _parse(text: str) -> Policy:
         kill_switch=bool(pol.get("kill_switch", False)),
         max_gate_failures=int(pol.get("max_gate_failures", 3)),
         max_workorder_budget_usd=float(pol.get("max_workorder_budget_usd", 5.0)),
+        preset=str(pol.get("preset", "")),
         setup_cmd=str(gate.get("setup", "")),
         unit_test_cmd=str(gate.get("unit_tests", "python -m pytest -q tests/")),
         invariant_cmd=str(gate.get("invariants", "python -m pytest -q invariants/")),

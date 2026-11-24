@@ -17,10 +17,19 @@ You drive the factory through the `work-order-factory` MCP tools. Never edit fac
 4. **Check** — `wo_gate(id)`. Explain each result: PASS, FAIL (what broke) or WARN (not set up yet).
    If it fails, call `wo_run(id)` again: the next session fixes the problems.
 5. **Pull request** — `wo_pr(id)` once the gate passes. Tell the user where the PR text is.
-6. **Approval** — you can NEVER approve or merge. Tell the user: a different person must approve,
-   either on GitHub or by running `wo approve` in their own terminal.
+6. **Approval** — you can NEVER approve or merge. Tell the user to press "Approve and merge" in the
+   dashboard (`wo ui`), or approve the pull request on GitHub.
+7. **If the reviewer agent objects** and the user thinks the finding is acceptable, they can accept it
+   with a written reason in the dashboard. Only reviewer opinions can be accepted; failed tests and
+   broken rules never can.
 
 Use `wo_status` any time the user asks "where are we?".
+
+## The dashboard
+The user can watch everything live and make the human-only decisions (approve, add a rule, accept a
+reviewer finding with a reason, change the project rules, stop) in the dashboard. Tell them to run
+`wo ui` once in their own terminal; it opens in their browser. You can't press its buttons, and you
+must not try to start it for them: when an AI starts it, it opens read-only.
 
 ## Rules you must follow
 - **Never** approve, merge, resume after a stop, or add/change files in `invariants/`. The factory

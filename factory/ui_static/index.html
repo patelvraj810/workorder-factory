@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Work-order factory</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#14161a;--muted:#5d6470;--line:#e3e6eb;--accent:#1240e0;--accent-bg:#eaf0ff;
+--ok:#137a3f;--ok-bg:#e6f5ec;--warn:#8a5a00;--warn-bg:#fdf3dc;--bad:#b42318;--bad-bg:#fdecea;--human:#5b3cc4;--human-bg:#efeafd;
+--mono:ui-monospace,SFMono-Regular,Menlo,monospace;--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#171a20;--ink:#e8eaee;--muted:#9aa2ae;--line:#2a2f38;--accent:#7c9bff;--accent-bg:#1c2540;
+--ok:#5fd18b;--ok-bg:#12291c;--warn:#f0c060;--warn-bg:#2d2412;--bad:#ff8a80;--bad-bg:#2f1715;--human:#b9a6ff;--human-bg:#231c3d}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans)}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--card)}
+header h1{font-size:16px;margin:0;font-weight:600}.sp{flex:1}
+.pill{display:inline-block;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500;white-space:nowrap}
+.ok{color:var(--ok);background:var(--ok-bg)}.warn{color:var(--warn);background:var(--warn-bg)}.bad{color:var(--bad);background:var(--bad-bg)}
+.human{color:var(--human);background:var(--human-bg)}.info{color:var(--accent);background:var(--accent-bg)}
+main{display:grid;grid-template-columns:280px minmax(0,1fr);gap:16px;padding:16px 20px;max-width:1280px;margin:0 auto}
+@media (max-width:860px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.card h2{font-size:13px;font-weight:600;color:var(--muted);margin:0 0 10px;text-transform:none}
+.wo{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px;cursor:pointer;background:var(--card)}
+.wo:hover{border-color:var(--accent)}.wo.sel{border:2px solid var(--accent);padding:9px}
+.wo .t{font-weight:600}.wo .s{color:var(--muted);font-size:12px;margin:2px 0 6px}
+button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:7px 12px;cursor:pointer}
+button:hover{border-color:var(--accent)}button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.danger{color:var(--bad)}button:disabled{opacity:.5;cursor:default}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.grid{display:grid;gap:16px}
+.next{border-left:4px solid var(--accent);background:var(--accent-bg);padding:10px 12px;border-radius:0;font-weight:500}
+.checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+.check{border:1px solid var(--line);border-radius:8px;padding:8px 10px}.check .n{font-weight:600;font-size:13px}
+.check .d{color:var(--muted);font-size:12px;word-break:break-word}
+.tl{list-style:none;margin:0;padding:0}.tl li{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)}
+.tl li:last-child{border-bottom:0}.tl .time{color:var(--muted);font-family:var(--mono);font-size:12px;min-width:70px}
+.finding{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px}
+.mono{font-family:var(--mono);font-size:12px}.muted{color:var(--muted)}
+pre{white-space:pre-wrap;word-break:break-word;font:12px/1.45 var(--mono);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:320px;overflow:auto;margin:8px 0 0}
+.tabs{display:flex;gap:6px;margin-bottom:12px}.tabs button.on{border-color:var(--accent);color:var(--accent)}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500;font-size:12px}.banner{margin:0 20px;margin-top:12px;padding:10px 14px;border-radius:10px}
+.hidden{display:none}.feat{display:flex;gap:8px;align-items:baseline;padding:3px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Work-order factory · <span id="project">…</span></h1>
+  <span id="preset" class="pill info"></span>
+  <span class="sp"></span>
+  <span class="muted">Signed in as <b id="user"></b></span>
+  <button id="stopBtn" class="danger" title="Stop all AI agents now. Anyone can stop; only a person can restart.">Stop all agents</button>
+</header>
+<div id="banners"></div>
+<main>
+  <section class="grid" style="align-content:start">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">Work orders</h2>
+        <button id="newBtn">+ New</button></div>
+      <div id="newForm" class="hidden" style="margin-bottom:10px">
+        <input id="newTitle" placeholder="Short title, e.g. Add a discount code" style="margin-bottom:6px">
+        <textarea id="newIntent" rows="3" placeholder="What should change, and what must NOT change"></textarea>
+        <div class="row" style="margin-top:6px"><button class="primary" id="newGo">Open work order</button><span id="newMsg" class="muted"></span></div>
+      </div>
+      <div id="woList"><p class="muted">Loading…</p></div>
+    </div>
+    <div class="card">
+      <h2>Tip</h2>
+      <p class="muted" style="margin:0">Talk to your AI tool to get work done (“open a work order to …”). Use this page to watch it and to make the decisions that must stay human.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="tabs"><button id="tabWork" class="on">Work order</button><button id="tabRules">Project rules</button></div>
+    <div id="workView" class="grid">
+      <div class="card" id="empty"><p class="muted" style="margin:0">Pick a work order on the left, or open a new one.</p></div>
+      <div id="detail" class="grid hidden">
+        <div class="card">
+          <div class="row" style="justify-content:space-between"><div><div style="font-size:18px;font-weight:600" id="dTitle"></div>
+            <div class="muted" id="dMeta"></div></div><span id="dStatus" class="pill"></span></div>
+          <p id="dIntent" style="margin:10px 0"></p>
+          <div class="next" id="dNext"></div>
+          <div class="row" style="margin-top:12px" id="actions">
+            <button data-a="plan">Plan</button><button data-a="run">Build next step</button><button data-a="gate">Run checks</button>
+            <button data-a="pr">Write PR text</button><button data-a="approve">Approve and merge</button>
+          </div>
+          <div id="actMsg" class="hidden"><pre id="actOut"></pre></div>
+        </div>
+        <div class="card"><h2>Plan</h2><div id="dFeatures"></div></div>
+        <div class="card" id="gateCard"><h2 id="gTitle">Checks</h2><div class="checks" id="gChecks"></div>
+          <div id="gFindings" style="margin-top:12px"></div></div>
+        <div class="card" id="rulesCard"><h2>Your rules (must never break)</h2>
+          <p class="muted" style="margin:0 0 8px">Ask your AI to <i>draft</i> a rule: it saves it in <span class="mono">.factory/proposals/</span>. Read it, then add it here. Only people can add rules.</p>
+          <div id="propList"></div></div>
+        <div class="card" id="handbackCard"><h2>Handed back to you</h2><pre id="handback"></pre></div>
+        <div class="card"><h2>What happened, in order</h2><ul class="tl" id="dTimeline"></ul></div>
+        <div class="card"><h2 id="liveTitle">Live: last AI session</h2><div id="live" class="mono"></div></div>
+      </div>
+    </div>
+    <div id="rulesView" class="hidden grid">
+      <div class="card"><h2>How strict should this project be?</h2><div id="presetBox" class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))"></div></div>
+      <div class="card"><h2>All rules for this project</h2>
+        <p class="muted" style="margin:0 0 8px">Saved to <span class="mono">factory.toml</span> as a normal git commit under your name, so changes are reviewable. The next check uses them.</p>
+        <table><thead><tr><th>Rule</th><th style="width:220px">Now</th><th>What it means</th></tr></thead><tbody id="rulesBody"></tbody></table>
+        <div class="row" style="margin-top:10px"><button class="primary" id="saveRules">Save changes</button><span id="rulesMsg" class="muted"></span></div>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+const TOKEN="__TOKEN__";let S=null,SEL=null,BUSY=false,RULES_DIRTY=false;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const tone=st=>({"gate passed":"ok","merged":"ok","approved":"ok","gate FAILED":"bad","handed back":"bad","in progress":"info","planned":"info","open":"info"}[st]||"info");
+const label=st=>({"gate passed":"Checks passed","gate FAILED":"Checks failed","handed back":"Handed back","in progress":"Building","planned":"Planned","open":"Open","approved":"Approved","merged":"Merged"}[st]||st);
+async function api(path,body){const r=await fetch(path,{method:body?"POST":"GET",headers:{"X-Token":TOKEN,"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});return r.json()}
+async function act(body,msgEl){if(BUSY)return;BUSY=true;document.querySelectorAll("button").forEach(b=>b.disabled=true);
+  const out=msgEl||$("actOut");if(!msgEl){$("actMsg").classList.remove("hidden")}out.textContent="Working… (AI steps can take a few minutes)";
+  try{const r=await api("/api/action",body);out.textContent=(r.ok?"Done.\n":"Not done.\n")+(r.command?("$ "+r.command+"\n\n"):"")+(r.output||"")}
+  catch(e){out.textContent="Error: "+e}BUSY=false;document.querySelectorAll("button").forEach(b=>b.disabled=false);await refresh(true)}
+function renderHeader(){$("project").textContent=S.project;$("user").textContent=S.user;
+  $("preset").textContent=S.preset?("Rules: "+S.preset):"Rules: custom";
+  const b=[];if(S.read_only)b.push(`<div class="banner warn">Read-only: this dashboard was started inside an AI agent session (${esc(S.read_only)}). Start <span class="mono">wo ui</span> from your own terminal to use the buttons.</div>`);
+  if(S.killed)b.push(`<div class="banner bad">All AI agents are stopped (${esc(S.killed.source)}: ${esc(S.killed.reason||"")}). <button id="resumeBtn">Allow agents again</button></div>`);
+  $("banners").innerHTML=b.join("");const rb=$("resumeBtn");if(rb)rb.onclick=()=>act({action:"resume"});
+  $("stopBtn").classList.toggle("hidden",!!S.killed)}
+function renderList(){if(!S.work_orders.length){$("woList").innerHTML='<p class="muted">No work orders yet. Ask your AI: “open a work order to …”, or press + New.</p>';return}
+  $("woList").innerHTML=S.work_orders.map(w=>`<div class="wo ${w.id===SEL?"sel":""}" data-id="${w.id}"><div class="t">${w.id} · ${esc(w.title)}</div>
+  <div class="s">by ${esc(w.requester)} · $${w.spent.toFixed(2)}</div>${w.running?'<span class="pill info">AI working…</span> ':""}
+  ${w.needs_you?'<span class="pill warn">Needs you</span> ':""}<span class="pill ${tone(w.status)}">${label(w.status)}</span></div>`).join("");
+  document.querySelectorAll(".wo").forEach(el=>el.onclick=()=>{SEL=el.dataset.id;$("actMsg").classList.add("hidden");refresh(true)})}
+function renderDetail(d){$("empty").classList.add("hidden");$("detail").classList.remove("hidden");
+  $("dTitle").textContent=`${d.id} · ${d.title||""}`;$("dMeta").textContent=`asked by ${d.requester||"?"} · spent $${d.spent.toFixed(2)} of $${S.budget.work_order.toFixed(2)} · branch ${d.branch||""}`;
+  $("dStatus").className="pill "+tone(d.status);$("dStatus").textContent=label(d.status);$("dIntent").textContent=d.intent||"";
+  $("dNext").textContent=(d.next&&d.next.text)||"";
+  $("actions").classList.toggle("hidden",["approved","merged"].includes(d.status));
+  document.querySelectorAll("#actions button").forEach(b=>{b.classList.toggle("primary",d.next&&b.dataset.a===d.next.action);b.onclick=()=>{
+    if(b.dataset.a==="approve"&&!confirm(`Approve ${d.id} and merge it into ${S.base}? This is recorded under your name.`))return;
+    act({action:b.dataset.a,wo:d.id})}});
+  $("dFeatures").innerHTML=(d.features||[]).length?d.features.map(f=>`<div class="feat"><span class="pill ${f.status==="done"?"ok":f.status==="blocked"?"bad":"info"}">${esc(f.status)}</span><span><b>${esc(f.id)}</b> ${esc(f.title)}</span></div>`).join(""):'<p class="muted" style="margin:0">Not planned yet.</p>';
+  const g=d.gate;$("gateCard").classList.toggle("hidden",!g);
+  if(g){$("gTitle").innerHTML=`Checks · run ${g.number} on ${esc(g.code_sha)} · <span class="pill ${g.passed?"ok":"bad"}">${g.passed?"passed":"failed"}</span>`;
+    $("gChecks").innerHTML=g.checks.map(c=>{const t=c.passed?"ok":(c.blocking?"bad":"warn");const w=c.passed?"PASS":(c.blocking?"FAIL":"WARN");
+      return `<div class="check"><div style="display:flex;gap:8px;align-items:flex-start"><span class="n" style="flex:1">${esc(plain(c.name))}</span><span class="pill ${t}">${w}</span></div><div class="d">${esc(c.detail).slice(0,260)}</div></div>`}).join("");
+    $("gFindings").innerHTML=g.findings.length?("<h2>What the reviewer agent said</h2>"+g.findings.map(f=>{
+      const a=f.accepted;const sev=f.severity==="high"?"bad":f.severity==="medium"?"warn":"info";
+      return `<div class="finding"><div class="row"><span class="pill ${sev}">${esc(f.severity)}</span><span class="mono">${esc(f.file)}</span></div>
+      <p style="margin:6px 0">${esc(f.issue)}</p>${f.failing_input?`<div class="muted mono">Example: ${esc(f.failing_input)}</div>`:""}
+      ${a?`<div style="margin-top:6px"><span class="pill human">Accepted by ${esc(a.by)}</span> <span class="muted">“${esc(a.reason)}”</span></div>`:
+        (g.can_accept&&!g.passed?`<div class="row" style="margin-top:8px"><input id="why${f.n}" placeholder="Why is this OK? (goes in the audit record)" style="flex:1;min-width:220px"><button data-f="${f.n}" class="acc">Accept with this reason</button></div>`:"")}</div>`}).join("")):"";
+    document.querySelectorAll(".acc").forEach(b=>b.onclick=()=>{const r=$("why"+b.dataset.f).value.trim();if(r.length<10){alert("Write a real reason (at least 10 characters).");return}
+      act({action:"accept",wo:d.id,finding:b.dataset.f,reason:r})})}
+  $("propList").innerHTML=S.proposals.length?S.proposals.map(p=>`<div class="row" style="margin-bottom:6px"><span class="mono" style="flex:1">${esc(p)}</span><button data-p="${esc(p)}" class="addrule">Add to ${d.id}</button></div>`).join(""):'<p class="muted" style="margin:0">No drafted rules yet.</p>';
+  document.querySelectorAll(".addrule").forEach(b=>b.onclick=()=>{if(confirm(`Add ${b.dataset.p} to ${d.id} as your rule? Agents can never change it after this.`))act({action:"rule",wo:d.id,file:b.dataset.p})});
+  $("handbackCard").classList.toggle("hidden",!d.handback);$("handback").textContent=d.handback||"";
+  $("dTimeline").innerHTML=d.timeline.slice().reverse().map(t=>`<li><span class="time">${esc(hhmm(t.ts))}</span><span class="pill ${t.tone}" style="align-self:flex-start">${esc(kind(t.event))}</span><span>${esc(t.text)}</span></li>`).join("");
+  const L=d.live||{calls:[]};$("liveTitle").textContent=d.running?`Live: AI ${d.running.role||"agent"} working now`:(L.session?`Last AI session: ${L.session}`:"Live");
+  $("live").innerHTML=L.calls.length?L.calls.slice().reverse().map(c=>`<div style="padding:3px 0;border-bottom:1px solid var(--line)"><span class="pill ${c.allowed==="True"?"ok":"bad"}">${c.allowed==="True"?"allowed":"blocked"}</span> <b>${esc(c.tool)}</b> ${esc(c.target)}${c.reason?` <span class="muted">— ${esc(c.reason)}</span>`:""}</div>`).join(""):'<p class="muted" style="margin:0">No AI activity yet.</p>'}
+function hhmm(ts){const d=new Date(ts);return isNaN(d)?ts.slice(11,16):d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}
+function plain(n){return({"protected paths":"Human-owned files","test config tamper":"Test settings untouched","diff size":"Size of AI change","secret scan":"No secrets","no float on money":"No float in money code","SAST (bandit)":"Security scan","invariants (human-owned)":"Your rules","unit tests":"Unit tests","independent reviewer agent":"Reviewer agent"}[n]||n)}
+function kind(e){return({"workorder.created":"opened","plan.created":"plan","session.started":"AI","session.completed":"built","gate.result":"check","review.completed":"review","invariant.added":"rule","finding.accepted":"accepted","gate.accepted":"accepted","workorder.handed_back":"stopped","approval.granted":"approved","merged":"merged","human_only.refused":"blocked","pr.prepared":"PR"}[e]||e.split(".")[0])}
+function renderRules(){if(RULES_DIRTY)return;
+  $("presetBox").innerHTML=Object.entries(S.presets).map(([k,v])=>`<div class="check" style="${S.preset===k?"border:2px solid var(--accent)":""}"><div class="row" style="justify-content:space-between"><b>${esc(k)}</b>${S.preset===k?'<span class="pill info">now</span>':`<button data-p="${k}" class="usep">Use this</button>`}</div><div class="d" style="margin-top:4px">${esc(v)}</div></div>`).join("");
+  document.querySelectorAll(".usep").forEach(b=>b.onclick=()=>{if(confirm(`Switch this project to “${b.dataset.p}” rules?`))act({action:"rules",preset:b.dataset.p},$("rulesMsg"))});
+  $("rulesBody").innerHTML=S.rules.map(r=>{let v=r.value;let ctl;
+    if(r.kind==="ro")ctl=`<span class="mono">${esc(Array.isArray(v)?v.join(", "):v)||"(not set)"}</span>`;
+    else if(r.kind==="bool")ctl=`<select data-k="${r.key}"><option value="true" ${v?"selected":""}>Yes</option><option value="false" ${!v?"selected":""}>No</option></select>`;
+    else if(r.kind==="choice")ctl=`<select data-k="${r.key}">${r.choices.map(c=>`<option ${c===v?"selected":""}>${c}</option>`).join("")}</select>`;
+    else ctl=`<input data-k="${r.key}" value="${esc(v)}">`;
+    return `<tr><td><b>${esc(r.label)}</b><div class="muted mono">${esc(r.key)}</div></td><td>${ctl}</td><td class="muted">${esc(r.meaning)}</td></tr>`}).join("");
+  document.querySelectorAll("#rulesBody [data-k]").forEach(el=>el.oninput=el.onchange=()=>{RULES_DIRTY=true})}
+$("saveRules").onclick=()=>{const set={};document.querySelectorAll("#rulesBody [data-k]").forEach(el=>{const r=S.rules.find(x=>x.key===el.dataset.k);
+  const now=r.kind==="bool"?String(!!r.value):String(r.value??"");if(el.value!==now)set[el.dataset.k]=el.value});
+  if(!Object.keys(set).length){$("rulesMsg").textContent="Nothing changed.";return}RULES_DIRTY=false;act({action:"rules",set},$("rulesMsg"))};
+$("tabWork").onclick=()=>{$("tabWork").classList.add("on");$("tabRules").classList.remove("on");$("workView").classList.remove("hidden");$("rulesView").classList.add("hidden")};
+$("tabRules").onclick=()=>{$("tabRules").classList.add("on");$("tabWork").classList.remove("on");$("rulesView").classList.remove("hidden");$("workView").classList.add("hidden")};
+$("newBtn").onclick=()=>$("newForm").classList.toggle("hidden");
+$("newGo").onclick=()=>{const t=$("newTitle").value.trim(),i=$("newIntent").value.trim();if(!t||!i){$("newMsg").textContent="Write a title and what you want.";return}
+  act({action:"new",title:t,intent:i},$("newMsg")).then(()=>{$("newTitle").value="";$("newIntent").value="";$("newForm").classList.add("hidden")})};
+$("stopBtn").onclick=()=>{const r=prompt("Stop all AI agents now. Why? (recorded)","stopped from the dashboard");if(r!==null)act({action:"kill",reason:r||"stopped from the dashboard"})};
+async function refresh(force){if(BUSY&&!force)return;try{S=await api("/api/state");if(S.error)throw S.error;renderHeader();
+  if(!SEL&&S.work_orders.length)SEL=(S.work_orders.find(w=>w.needs_you||w.running)||S.work_orders[0]).id;renderList();renderRules();
+  if(SEL){const d=await api("/api/wo/"+SEL);if(!d.error)renderDetail(d)}}catch(e){$("woList").innerHTML=`<p class="bad" style="padding:8px;border-radius:8px">Can't reach the factory: ${esc(e)}</p>`}}
+refresh(true);setInterval(()=>refresh(false),2500);
+</script>
+</body>
+</html>
