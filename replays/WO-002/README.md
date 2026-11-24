@@ -4,7 +4,8 @@
 that the existing margin check rejects orders that *close* a position. That breaks AGENTS.md rule 5.
 They were right not to fix it inside WO-001 (out of scope). This is the follow-up work order.
 
-**The human part (already done):** `human/test_margin_invariants.py` states the business rule:
+**The human part:** `human/test_margin_invariants.py` states the business rule. The agent drafted the test code;
+**I read it and agree with the rule before running `wo new`**, which commits it under my name. The rule:
 - reducing or closing never needs margin;
 - opening new exposure needs margin for the new exposure only (a flip: only the new side).
 
