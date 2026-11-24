@@ -497,3 +497,19 @@ def test_money_rule_only_where_configured():
     diff = "+++ b/pricing/calc.py\n+    total: float = 0\n"
     assert not check_no_float_money(diff, ["pricing/"]).passed
     assert check_no_float_money(diff, ["orders/"]).passed
+
+
+def test_mcp_path_starts_agents_but_still_refuses_human_only(monkeypatch):
+    import factory.mcp_server as m
+    from factory.cli import agent_session_marker
+    seen = {}
+    def fake_run(cmd, **kw):
+        seen.update(kw["env"])
+        class P: returncode, stdout, stderr = 0, "", ""
+        return P()
+    monkeypatch.setenv("CLAUDECODE", "1"); monkeypatch.setenv("WO_REPO", "/tmp/x"); monkeypatch.setenv("WO_USER", "vraj")
+    monkeypatch.setattr(m.subprocess, "run", fake_run)
+    m._wo("status")
+    assert "CLAUDECODE" not in seen and seen["WO_CHANNEL"] == "mcp"
+    monkeypatch.delenv("CLAUDECODE"); monkeypatch.setenv("WO_CHANNEL", "mcp")
+    assert agent_session_marker() == "WO_CHANNEL=mcp"

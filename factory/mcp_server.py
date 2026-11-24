@@ -53,6 +53,9 @@ def _user() -> str:
 
 def _wo(*args: str) -> dict:
     env = {**os.environ, "NO_COLOR": "1", "COLUMNS": "110", "TERM": "dumb", "WO_CHANNEL": "mcp"}
+    # The factory starts its own Claude agents. Claude Code refuses to start inside another Claude
+    # Code session, so drop its marker. Human-only commands still refuse: WO_CHANNEL=mcp marks this path.
+    env.pop("CLAUDECODE", None)
     p = subprocess.run([sys.executable, "-m", "factory.cli", "--repo", _repo(), *args],
                        capture_output=True, text=True, env=env, timeout=3600)
     out = (p.stdout + ("\n" + p.stderr if p.stderr.strip() else "")).strip()
