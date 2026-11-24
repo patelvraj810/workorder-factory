@@ -99,7 +99,7 @@ or the desktop app.
 | Action | Why Claude can't do it | How you do it |
 |---|---|---|
 | **Approve / merge** | The person who asked for the change, and the AI that made it, must not approve it. | On GitHub, approve the pull request. Or in your own terminal: `wo approve WO-001 --by REVIEWER_NAME` (a different person from the requester). |
-| **Add a rule (invariant)** | The AI must never write the tests it is judged by. | Ask Claude to **draft** the rule. It saves it in `.factory/proposals/`. Read it, then in your own terminal: `wo new "Title" --intent "..." --by YOUR_NAME --invariant .factory/proposals/test_x.py` |
+| **Add a rule (invariant)** | The AI must never write the tests it is judged by. | Ask Claude to **draft** the rule. It saves it in `.factory/proposals/`. Read it, then in your own terminal: for an **open** work order `wo rule WO-001 .factory/proposals/test_x.py --by YOUR_NAME`; for a **new** one `wo new "Title" --intent "..." --by YOUR_NAME --invariant .factory/proposals/test_x.py` |
 | **Turn the kill switch off** | Anyone (or any agent) can stop. Only a human can start again. | `wo resume --by YOUR_NAME` in your own terminal. |
 
 If an AI agent tries any of these, the factory refuses and writes the attempt in the audit
@@ -112,6 +112,9 @@ a required review from a code owner, and the `factory-gate` CI job that re-runs 
 Turn both on before a team relies on it.
 
 ---
+
+**Folder names:** don't start or end a project folder's name with a space. AI agents drop that space
+when they write file paths, and every write gets refused. `wo init` checks this for you.
 
 ## 4. What it costs
 

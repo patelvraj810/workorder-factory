@@ -458,6 +458,7 @@ def test_init_sets_up_a_node_repo_and_never_overwrites(tmp_path):
     srv = json.loads((r / ".mcp.json").read_text())["mcpServers"]["work-order-factory"]
     assert srv["env"]["WO_REPO"] == str(r) and srv["env"]["WO_USER"] == "vraj"
     assert ".factory/worktrees/" in (r / ".gitignore").read_text()
+    assert "node_modules/" in (r / ".gitignore").read_text()
     # Only the factory's files were committed; the user's other work was left alone.
     committed = gitops.git(r, "show", "--name-only", "--format=", "HEAD").split()
     assert "factory.toml" in committed and "notes.txt" not in committed and "AGENTS.md" not in committed
@@ -474,6 +475,7 @@ def test_init_on_a_plain_folder_makes_a_repo(tmp_path):
     main(["--repo", str(r), "init", "--user", "vraj"])
     assert (r / ".git").exists() and gitops.default_base(r) == "main"
     assert load_policy(r).unit_test_cmd == ""        # 'other' stack: not set up yet
+    assert "__pycache__/" not in (r / ".gitignore").read_text()
 
 
 def test_gate_runs_configured_commands_and_warns_when_not_set_up(tmp_path):
@@ -547,3 +549,37 @@ def test_missing_test_folder_is_a_warning_not_a_failure(tmp_path):
     from factory.gate import check_tests
     c = check_tests(tmp_path, "unit tests", "python -m pytest -q tests/", invariants=False)
     assert not c.passed and not c.blocking
+
+
+def test_init_refuses_folder_names_with_edge_spaces(tmp_path):
+    r = tmp_path / "test-project "; r.mkdir()
+    with pytest.raises(SystemExit, match="starts or ends with a space"):
+        main(["--repo", str(r), "init", "--user", "vraj"])
+    assert not (r / "factory.toml").exists()
+
+
+def test_cache_folders_never_block_or_get_committed(repo):
+    wo(repo, "new", "Per-symbol position limits", "--intent", "limits", "--by", "vraj")
+    wt = repo / ".factory" / "worktrees" / "WO-001"
+    (wt / "invariants" / "__pycache__").mkdir()
+    (wt / "invariants" / "__pycache__" / "x.cpython-312.pyc").write_bytes(b"\0")
+    assert gitops.git(wt, "status", "--porcelain") == ""             # ignored, so nothing "uncommitted"
+    wo(repo, "plan", "WO-001")                                         # no refusal
+    assert "__pycache__" not in gitops.git(wt, "ls-files")
+
+
+def test_human_can_add_a_rule_to_an_open_work_order_and_gate_accepts_it(repo, tmp_path, monkeypatch):
+    from factory.gate import check_protected
+    wo(repo, "new", "Per-symbol position limits", "--intent", "limits", "--by", "vraj")
+    rule = tmp_path / "test_my_rule.py"; rule.write_text("def test_ok():\n    assert True\n")
+    wo(repo, "rule", "WO-001", str(rule), "--by", "vraj")
+    wt = repo / ".factory" / "worktrees" / "WO-001"
+    assert (wt / "invariants" / "test_my_rule.py").exists()
+    # A plain human commit (no marker) also counts as human-owned; only agent commits fail.
+    (wt / "invariants" / "test_more.py").write_text("def test_more():\n    assert True\n")
+    gitops.git(wt, "-c", "user.name=vraj", "-c", "user.email=vraj@example.com", "add", "-A")
+    gitops.git(wt, "-c", "user.name=vraj", "-c", "user.email=vraj@example.com", "commit", "-qm", "my rule")
+    assert check_protected(wt, "main", load_policy(repo)).passed
+    monkeypatch.setenv("CLAUDECODE", "1")
+    with pytest.raises(SystemExit, match="must be done by a human"):
+        wo(repo, "rule", "WO-001", str(rule), "--by", "vraj")

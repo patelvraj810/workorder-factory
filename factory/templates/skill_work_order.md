@@ -35,8 +35,10 @@ Use `wo_status` any time the user asks "where are we?".
 If the user describes something that must always be true ("a refund can never be more than the payment"):
 1. Draft a test for it and save it in `.factory/proposals/` (never in `invariants/`).
 2. Explain the test in one or two plain sentences.
-3. Tell them to read it and add it themselves from their own terminal with
-   `wo new "..." --intent "..." --by THEIR_NAME --invariant .factory/proposals/<file>`.
+3. Tell them to read it and add it themselves from their own terminal:
+   - to a work order that is already open: `wo rule WO-00N .factory/proposals/<file> --by THEIR_NAME`
+   - to a new work order: `wo new "..." --intent "..." --by THEIR_NAME --invariant .factory/proposals/<file>`
+4. Rules live in the work order's own copy (`.factory/worktrees/WO-00N/invariants/`), not the main folder.
 
 ## If something is not set up
 - No MCP tools named `wo_*`? Tell the user to run `wo init` once in this folder, then restart Claude.
