@@ -33,22 +33,22 @@ wo plan WO-001 || true
 wo resume --by sec-lead --note "checked, fine"
 
 step "3. PLANNER agent splits the work into small features (audit record written FIRST)"
-wo plan WO-001 "${RECORD_ARGS[@]}"
+wo plan WO-001 ${RECORD_ARGS[@]+"${RECORD_ARGS[@]}"}
 
 step "4. IMPLEMENTER session 1 — F1 (fresh context, reads progress.md)"
-wo run WO-001 "${RECORD_ARGS[@]}"
+wo run WO-001 ${RECORD_ARGS[@]+"${RECORD_ARGS[@]}"}
 
 step "5. IMPLEMENTER session 2 — F2 (new session, no memory except the files)"
-wo run WO-001 "${RECORD_ARGS[@]}"
+wo run WO-001 ${RECORD_ARGS[@]+"${RECORD_ARGS[@]}"}
 
 step "6. GATE — the agent's own tests pass... do the human-owned invariants?"
-wo gate WO-001 "${RECORD_ARGS[@]}" || true
+wo gate WO-001 ${RECORD_ARGS[@]+"${RECORD_ARGS[@]}"} || true
 
 step "7. IMPLEMENTER session 3 — fix mode: gets the gate report, not a human's time"
-wo run WO-001 "${RECORD_ARGS[@]}"
+wo run WO-001 ${RECORD_ARGS[@]+"${RECORD_ARGS[@]}"}
 
 step "8. GATE again"
-wo gate WO-001 "${RECORD_ARGS[@]}"
+wo gate WO-001 ${RECORD_ARGS[@]+"${RECORD_ARGS[@]}"}
 
 step "8b. Same gate in CI: GitHub Actions runs this on the PR (no model calls, no secrets)"
 (cd .factory/worktrees/WO-001 && wo --repo . ci --base main)
