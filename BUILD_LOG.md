@@ -94,7 +94,6 @@ what I still do before submitting.
 | Round 5: `wo init`, Claude skill, approval guard, public-repo prep | ~30 min |
 | **Total build time** | **about 3 h 55 min, within the 4-hour timebox** |
 
-Rehearsing, recording the demo and the final slide edit are presentation prep, not build time.
 
 **How I used the time:** I spent it on three things, not on more features.
 
