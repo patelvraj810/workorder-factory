@@ -1,0 +1,58 @@
+diff --git a/orders/validation.py b/orders/validation.py
+index cf686a0..e8edc9e 100644
+--- a/orders/validation.py
++++ b/orders/validation.py
+@@ -27,11 +27,19 @@ def required_margin(order: Order) -> Decimal:
+ 
+ 
+ def _breaches_position_limit(order: Order, account: Account) -> bool:
++    """True only if the order INCREASES exposure beyond the limit.
++
++    Orders that reduce or close a position are never blocked, even when the
++    account is already over its limit (e.g. after the limit was lowered).
++    """
+     limit = account.position_limits.get(order.symbol)
+     if limit is None:
+         return False
+     current = account.positions.get(order.symbol, Decimal("0"))
+-    return abs(current) + order.qty > limit
++    new_position = current + signed_qty(order)
++    if abs(new_position) <= abs(current):
++        return False
++    return abs(new_position) > limit
+ 
+ 
+ def validate_order(order: Order, account: Account) -> ValidationResult:
+diff --git a/tests/test_validation.py b/tests/test_validation.py
+index f9028e6..a76d12e 100644
+--- a/tests/test_validation.py
++++ b/tests/test_validation.py
+@@ -66,3 +66,28 @@ def test_buy_beyond_limit_rejected():
+ def test_buy_exactly_to_limit_accepted():
+     r = validate_order(Order("XAUUSD", Side.BUY, D("10.00"), D("2400.00")), limited("10", "20"))
+     assert r.accepted
++
++
++def test_sell_reducing_long_never_blocked():
++    r = validate_order(Order("XAUUSD", Side.SELL, D("5.00"), D("2400.00")), limited("10", "12"))
++    assert r.accepted
++
++
++def test_reducing_allowed_when_already_over_limit():
++    r = validate_order(Order("XAUUSD", Side.SELL, D("5.00"), D("2400.00")), limited("30", "20"))
++    assert r.accepted
++
++
++def test_buy_reducing_short_never_blocked():
++    r = validate_order(Order("XAUUSD", Side.BUY, D("5.00"), D("2400.00")), limited("-30", "20"))
++    assert r.accepted
++
++
++def test_sell_increasing_short_beyond_limit_rejected():
++    r = validate_order(Order("XAUUSD", Side.SELL, D("15.00"), D("2400.00")), limited("-10", "20"))
++    assert r.reason is Reason.POSITION_LIMIT
++
++
++def test_flip_long_to_short_beyond_limit_rejected():
++    r = validate_order(Order("XAUUSD", Side.SELL, D("35.00"), D("2400.00")), limited("10", "20"))
++    assert r.reason is Reason.POSITION_LIMIT

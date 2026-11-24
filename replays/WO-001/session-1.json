@@ -1,0 +1,20 @@
+{
+  "meta": {
+    "model": "sonnet",
+    "cost_usd": 0.18,
+    "input_tokens": 22100,
+    "output_tokens": 2100,
+    "recorded_from": "scripted during build: the build sandbox had no live API access. Re-record with `--record` on a machine with Claude Code login."
+  },
+  "output": {
+    "feature_id": "F1",
+    "status": "done",
+    "summary": "Added Account.position_limits (empty by default) and Reason.POSITION_LIMIT",
+    "tests_added": [
+      "test_account_has_no_position_limits_by_default",
+      "test_position_limit_reason_exists"
+    ],
+    "notes_for_next_session": "Model change only, no behaviour change yet. F2 must add the check inside validate_order. Put it before the margin check so the reason is specific. invariants/test_position_limit_invariants.py describes the expected behaviour: read it first.",
+    "concerns": []
+  }
+}

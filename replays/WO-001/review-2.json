@@ -1,0 +1,22 @@
+{
+  "meta": {
+    "model": "opus",
+    "cost_usd": 0.24,
+    "input_tokens": 16900,
+    "output_tokens": 1200,
+    "recorded_from": "scripted during build: the build sandbox had no live API access. Re-record with `--record` on a machine with Claude Code login."
+  },
+  "output": {
+    "verdict": "approve",
+    "summary": "Direction-aware check is correct for all cases I traced, including over-limit reduction and flips. Tests now cover both sides.",
+    "findings": [
+      {
+        "severity": "low",
+        "file": "orders/validation.py",
+        "issue": "Flip rule (long to short) is a business decision, not only code. The implementer flagged it too.",
+        "failing_input": "",
+        "suggestion": "Human reviewer: confirm the flip rule with the trading team."
+      }
+    ]
+  }
+}

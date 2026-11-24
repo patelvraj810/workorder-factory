@@ -1,0 +1,5 @@
+# Human-owned paths. Changes need approval from these owners.
+/invariants/     @trading-platform-leads
+/factory.toml    @ai-platform @security-compliance
+/CODEOWNERS      @ai-platform @security-compliance
+/.github/        @ai-platform

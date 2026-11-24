@@ -1,0 +1,25 @@
+{
+  "meta": {
+    "model": "sonnet",
+    "cost_usd": 0.29,
+    "input_tokens": 39400,
+    "output_tokens": 3300,
+    "recorded_from": "scripted during build: the build sandbox had no live API access. Re-record with `--record` on a machine with Claude Code login."
+  },
+  "output": {
+    "feature_id": "FIX",
+    "status": "done",
+    "summary": "Limit check now uses signed new position; reducing orders are never blocked",
+    "tests_added": [
+      "test_sell_reducing_long_never_blocked",
+      "test_reducing_allowed_when_already_over_limit",
+      "test_buy_reducing_short_never_blocked",
+      "test_sell_increasing_short_beyond_limit_rejected",
+      "test_flip_long_to_short_beyond_limit_rejected"
+    ],
+    "notes_for_next_session": "Gate 1 failures fixed: direction-aware check plus 5 tests for SELL/short/over-limit/flip. Ran unit tests (16 pass) and invariants (7 pass). Ready for gate.",
+    "concerns": [
+      "A flip from long to short is checked against the new absolute position only. Confirm with the trading team that this is the intended rule."
+    ]
+  }
+}

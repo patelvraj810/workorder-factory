@@ -1,0 +1,19 @@
+[project]
+name = "workorder-factory"
+version = "0.1.0"
+description = "A work-order software factory prototype: human-owned intent and invariants, agents in sandboxes, independent gates, hash-chained audit ledger."
+requires-python = ">=3.11"
+dependencies = ["claude-agent-sdk>=0.1", "rich>=13", "pytest>=8", "hypothesis>=6", "bandit>=1.7", "anyio>=4"]
+
+[project.scripts]
+wo = "factory.cli:main"
+
+[tool.setuptools]
+packages = ["factory"]
+
+[tool.setuptools.package-data]
+factory = ["prompts/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"

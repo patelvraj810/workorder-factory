@@ -1,0 +1,28 @@
+# Factory policy for this repository. Human-owned (see CODEOWNERS).
+# The harness reads this; agents cannot edit it (protected path).
+
+[policy]
+# Paths agents may never write. Enforced twice: a pre-tool hook blocks the write,
+# and the gate fails if the diff touches them anyway.
+protected_paths = ["invariants/", "factory.toml", "CODEOWNERS", ".github/", ".factory/ledger.jsonl"]
+
+# Files agents may never read (secrets).
+secret_paths = [".env", "*.pem", "*.key"]
+
+# Max changed lines (added + removed) in one work order, excluding .factory/.
+max_diff_lines = 250
+
+# Cost guard per agent session, in USD.
+max_session_budget_usd = 1.50
+
+# Commands the implementer agent may run.
+allowed_bash = ["python -m pytest", "pytest", "git diff", "git status", "ls", "cat"]
+
+[review]
+# Approver must be a different human from the requester.
+require_independent_approver = true
+# Reviewer-agent findings at or above this severity block the gate.
+blocking_severity = "high"
+
+[owners]
+invariants = ["trading-platform-leads"]

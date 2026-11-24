@@ -1,0 +1,37 @@
+{
+  "meta": {
+    "model": "opus",
+    "cost_usd": 0.21,
+    "input_tokens": 18400,
+    "output_tokens": 1300,
+    "recorded_from": "scripted during build: the build sandbox had no live API access. Re-record with `--record` on a machine with Claude Code login."
+  },
+  "output": {
+    "features": [
+      {
+        "id": "F1",
+        "title": "Add per-symbol position limits to the Account model and a POSITION_LIMIT reason",
+        "acceptance": [
+          "Account.position_limits: dict[str, Decimal], empty by default (= no limits)",
+          "Reason.POSITION_LIMIT exists",
+          "All existing tests and invariants still pass"
+        ]
+      },
+      {
+        "id": "F2",
+        "title": "Enforce the position limit in validate_order",
+        "acceptance": [
+          "Orders that would take |net position| above the limit are rejected with POSITION_LIMIT",
+          "Exactly at the limit is allowed",
+          "Symbols with no configured limit are never limit-rejected",
+          "Unit tests for BUY and SELL, long and short"
+        ]
+      }
+    ],
+    "risks": [
+      "Sign handling: SELL reduces a long position; a check on abs(position) + qty would block traders from closing positions.",
+      "Accounts already over a newly lowered limit must still be able to reduce exposure.",
+      "Do not use float when comparing Decimal quantities to the limit."
+    ]
+  }
+}

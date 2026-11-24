@@ -1,0 +1,57 @@
+diff --git a/orders/validation.py b/orders/validation.py
+index bfdc657..cf686a0 100644
+--- a/orders/validation.py
++++ b/orders/validation.py
+@@ -26,6 +26,14 @@ def required_margin(order: Order) -> Decimal:
+     return order.qty * order.price * inst.margin_rate
+ 
+ 
++def _breaches_position_limit(order: Order, account: Account) -> bool:
++    limit = account.position_limits.get(order.symbol)
++    if limit is None:
++        return False
++    current = account.positions.get(order.symbol, Decimal("0"))
++    return abs(current) + order.qty > limit
++
++
+ def validate_order(order: Order, account: Account) -> ValidationResult:
+     inst = INSTRUMENTS.get(order.symbol)
+     if inst is None:
+@@ -36,6 +44,8 @@ def validate_order(order: Order, account: Account) -> ValidationResult:
+         return ValidationResult.reject(Reason.BAD_LOT_STEP)
+     if order.price <= 0 or not _is_multiple(order.price, inst.tick_size):
+         return ValidationResult.reject(Reason.BAD_PRICE_TICK)
++    if _breaches_position_limit(order, account):
++        return ValidationResult.reject(Reason.POSITION_LIMIT)
+     if required_margin(order) > account.free_margin:
+         return ValidationResult.reject(Reason.INSUFFICIENT_MARGIN)
+     return ValidationResult.ok()
+diff --git a/tests/test_validation.py b/tests/test_validation.py
+index 0bef85a..f9028e6 100644
+--- a/tests/test_validation.py
++++ b/tests/test_validation.py
+@@ -45,3 +45,24 @@ def test_account_has_no_position_limits_by_default():
+ 
+ def test_position_limit_reason_exists():
+     assert Reason.POSITION_LIMIT.value == "POSITION_LIMIT"
++
++
++def limited(position, limit):
++    a = acct(positions={"XAUUSD": D(position)})
++    a.position_limits = {"XAUUSD": D(limit)}
++    return a
++
++
++def test_buy_within_limit_accepted():
++    r = validate_order(Order("XAUUSD", Side.BUY, D("5.00"), D("2400.00")), limited("10", "20"))
++    assert r.accepted
++
++
++def test_buy_beyond_limit_rejected():
++    r = validate_order(Order("XAUUSD", Side.BUY, D("15.00"), D("2400.00")), limited("10", "20"))
++    assert r.reason is Reason.POSITION_LIMIT
++
++
++def test_buy_exactly_to_limit_accepted():
++    r = validate_order(Order("XAUUSD", Side.BUY, D("10.00"), D("2400.00")), limited("10", "20"))
++    assert r.accepted

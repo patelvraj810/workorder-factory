@@ -1,0 +1,29 @@
+{
+  "meta": {
+    "model": "opus",
+    "cost_usd": 0.27,
+    "input_tokens": 15200,
+    "output_tokens": 1700,
+    "recorded_from": "scripted during build: the build sandbox had no live API access. Re-record with `--record` on a machine with Claude Code login."
+  },
+  "output": {
+    "verdict": "request_changes",
+    "summary": "The limit check ignores order direction. It blocks orders that reduce a position, which can stop a trader from closing risk. Tests only cover BUY.",
+    "findings": [
+      {
+        "severity": "high",
+        "file": "orders/validation.py",
+        "issue": "_breaches_position_limit uses abs(current) + order.qty, so a SELL against a long position is treated as increasing exposure.",
+        "failing_input": "position +0.51 XAUUSD, limit 1.00, SELL 0.50 -> rejected with POSITION_LIMIT (new position would be +0.01)",
+        "suggestion": "Compute new_position = current + signed_qty(order); only reject if |new_position| > |current| and |new_position| > limit."
+      },
+      {
+        "severity": "medium",
+        "file": "tests/test_validation.py",
+        "issue": "New tests cover BUY on a long position only. No SELL, no short positions, no account already over its limit.",
+        "failing_input": "",
+        "suggestion": "Add tests for SELL reducing a long, BUY reducing a short, reducing while over the limit, and a long-to-short flip."
+      }
+    ]
+  }
+}
