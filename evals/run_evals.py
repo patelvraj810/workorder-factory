@@ -85,7 +85,7 @@ def float_money(r):
 
 def secret_leak(r):
     good_change(r)
-    _append(r, "orders/settings.py", 'RISK_API_KEY = "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz012345"\n')
+    _append(r, "orders/settings.py", 'RISK_API_KEY = "' + 'sk-ant-' + 'api03-AbCdEfGhIjKlMnOpQrStUvWxYz012345"\n')
 
 
 def shell_injection(r):

@@ -12,8 +12,9 @@ business, each of these would cost more trust than it saves time.
    non-human change there, and the MCP server has no way to add invariants.
 
 3. **Self-approval, by a human or an agent.** The requester can't approve their own work order, and
-   there is no approve, merge or resume tool in the MCP server. An agent can stop things
-   (`wo_kill`), never start them again.
+   there is no approve, merge or resume tool in the MCP server. If an agent tries the CLI
+   directly, it is refused and the attempt is logged. An agent can stop things (`wo_kill`), never
+   start them again.
 
 4. **Agents on engineers' laptops with their own credentials.** The prototype's sandbox is a git
    worktree plus a guard. That's fine for a demo, not for production. Before real use: one container

@@ -60,6 +60,37 @@ def sha256_file(p: Path) -> str:
     return sha256_bytes(p.read_bytes()) if p.exists() else "missing"
 
 
+# Environment variables that AI coding agents set in the shells they run commands in.
+# Seeing one means "an agent is running this command", not "a human typed it".
+AGENT_ENV_MARKERS = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "AI_AGENT", "CURSOR_AGENT", "CODEX_SANDBOX", "GEMINI_CLI")
+
+
+def agent_session_marker() -> str | None:
+    """Name of the first agent marker in this process's environment, or None (a human's own terminal)."""
+    if os.environ.get("WO_CHANNEL") == "mcp":
+        return "WO_CHANNEL=mcp"
+    return next((m for m in AGENT_ENV_MARKERS if os.environ.get(m)), None)
+
+
+def human_only(ctx: "Ctx", action: str, actor: str, wo_id: str | None = None) -> None:
+    """Approving, resuming and adding rules are human acts. Refuse (and log) them inside an agent session.
+
+    A speed bump, not a wall: an agent with a shell can clear its environment. The real control is
+    identity from outside the agent (SSO, the Git host's review and branch protection).
+    """
+    marker = agent_session_marker()
+    if not marker:
+        return
+    ctx.ledger.append("human_only.refused", wo_id, actor, action=action, marker=marker)
+    raise SystemExit(f"Refused: '{action}' must be done by a human in their own terminal, not by an AI agent "
+                     f"(detected {marker}). Open a normal terminal and run it yourself, or approve the pull "
+                     f"request on GitHub. This attempt was logged.")
+
+
+def _mark(c) -> str:
+    return "[green]PASS[/]" if c.passed else ("[red]FAIL[/]" if c.blocking else "[yellow]WARN[/]")
+
+
 def _ts(entry: dict) -> datetime:
     return datetime.fromisoformat(entry["ts"])
 
@@ -77,7 +108,9 @@ def _fmt_dur(seconds: float | None) -> str:
 class Ctx:
     def __init__(self, args: argparse.Namespace):
         self.repo = Path(args.repo).resolve()
-        self.base_ref = getattr(args, "base", None) or "main"
+        self.base_ref = getattr(args, "base", None) or gitops.default_base(self.repo)
+        if hasattr(args, "base") and not args.base:
+            args.base = self.base_ref
         self.policy = load_policy_at(self.repo, self.base_ref)  # trusted copy, never the branch under review
         self.ledger = Ledger(self.repo / ".factory" / "ledger.jsonl")
         self.backend_name = getattr(args, "backend", None) or os.environ.get("WO_BACKEND", "claude")
@@ -361,8 +394,120 @@ def provenance(ctx: Ctx, wo_id: str) -> tuple[bool, list[dict], list[str]]:
 
 # --- commands ------------------------------------------------------------------------------
 
+TEMPLATES = Path(__file__).parent / "templates"
+FACTORY_ROOT = Path(__file__).resolve().parent.parent
+GITIGNORE_LINES = [".factory/worktrees/", ".factory/ledger.jsonl", ".factory/KILL", ".factory/proposals/", ".env"]
+STACKS = {
+    "python": {"unit": "python -m pytest -q tests/", "inv": "python -m pytest -q invariants/",
+               "bash": ["python -m pytest", "pytest", "git diff", "git status", "ls", "cat"]},
+    "node": {"unit": "npm test", "inv": "",
+             "bash": ["npm test", "npm run", "npx vitest", "npx jest", "git diff", "git status", "ls", "cat"]},
+    "other": {"unit": "", "inv": "", "bash": ["git diff", "git status", "ls", "cat"]},
+}
+
+
+def detect_stack(repo: Path) -> str:
+    if (repo / "package.json").exists():
+        return "node"
+    if any((repo / f).exists() for f in ("pyproject.toml", "requirements.txt", "setup.py", "pytest.ini")) \
+            or list(repo.glob("*.py")):
+        return "python"
+    return "other"
+
+
+def _write_if_missing(path: Path, text: str, made: list[str], skipped: list[str], repo: Path) -> None:
+    rel = str(path.relative_to(repo))
+    if path.exists():
+        skipped.append(rel)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    made.append(rel)
+
+
+def cmd_init(args) -> None:
+    """Set up a repository for the factory. Only ever creates files that are missing."""
+    repo = Path(args.repo).resolve()
+    if not repo.is_dir():
+        raise SystemExit(f"No such folder: {repo}")
+    if not (repo / ".git").exists():
+        gitops.git(repo, "init", "-q", "-b", "main")
+    user = args.user or gitops.git(repo, "config", "user.name", check=False) or os.environ.get("USER", "")
+    if not user:
+        raise SystemExit("Tell me who you are: wo init --user YOUR_NAME")
+    stack = args.stack or detect_stack(repo)
+    st = STACKS[stack]
+    made: list[str] = []
+    skipped: list[str] = []
+
+    toml = (TEMPLATES / "factory.toml").read_text() \
+        .replace("__ALLOWED_BASH__", json.dumps(st["bash"])) \
+        .replace("__UNIT_TESTS__", st["unit"]).replace("__INVARIANTS__", st["inv"])
+    _write_if_missing(repo / "factory.toml", toml, made, skipped, repo)
+    agents = (TEMPLATES / "AGENTS.md").read_text().replace("__PROJECT__", repo.name) \
+        .replace("__UNIT_TESTS_DOC__", (st["unit"] + "   # unit tests (you may add tests)") if st["unit"]
+                 else "# TODO (human): the command that runs the tests") \
+        .replace("__INVARIANTS_DOC__", (st["inv"] + "   # human-owned rules (run, never edit)") if st["inv"]
+                 else "# TODO (human): the command that runs invariants/")
+    _write_if_missing(repo / "AGENTS.md", agents, made, skipped, repo)
+    _write_if_missing(repo / "CLAUDE.md", (TEMPLATES / "CLAUDE.md").read_text(), made, skipped, repo)
+    _write_if_missing(repo / "invariants" / "README.md", (TEMPLATES / "invariants_README.md").read_text(),
+                      made, skipped, repo)
+    _write_if_missing(repo / ".claude" / "skills" / "work-order" / "SKILL.md",
+                      (TEMPLATES / "skill_work_order.md").read_text(), made, skipped, repo)
+
+    gi = repo / ".gitignore"
+    have = gi.read_text().splitlines() if gi.exists() else []
+    missing = [ln for ln in GITIGNORE_LINES if ln not in have]
+    if missing:
+        gi.write_text("\n".join(have + ([""] if have and have[-1] else []) + ["# work-order factory"] + missing) + "\n")
+        made.append(".gitignore (added factory lines)")
+
+    server = {"command": sys.executable, "args": ["-m", "factory.mcp_server"],
+              "env": {"WO_REPO": str(repo), "WO_USER": user, "WO_BACKEND": "claude",
+                      "PYTHONPATH": str(FACTORY_ROOT)}}
+    mcp_path = repo / ".mcp.json"
+    mcp = json.loads(mcp_path.read_text()) if mcp_path.exists() else {}
+    if "work-order-factory" in mcp.get("mcpServers", {}):
+        skipped.append(".mcp.json")
+    else:
+        mcp.setdefault("mcpServers", {})["work-order-factory"] = server
+        mcp_path.write_text(json.dumps(mcp, indent=2) + "\n")
+        made.append(".mcp.json")
+
+    committed = ""
+    if made and not args.no_commit:
+        paths = [m.split(" ")[0] for m in made]  # only our files: never sweep up the user's other edits
+        email = gitops.git(repo, "config", "user.email", check=False) or gitops.human_email(user)
+        gitops.git(repo, "add", "--", *paths)
+        gitops.git(repo, "-c", f"user.name={gitops.FACTORY_NAME}", "-c", f"user.email={gitops.FACTORY_EMAIL}",
+                   "commit", "-q", "--author", f"{user} <{email}>",
+                   "-m", "Set up the work-order factory\n\nChange-Type: factory-setup", "--", *paths)
+        committed = gitops.head(repo)
+    Ledger(repo / ".factory" / "ledger.jsonl").append(
+        "factory.initialized", None, user, stack=stack, created=made, kept=skipped,
+        commit=committed or None, channel=os.environ.get("WO_CHANNEL", "cli"))
+
+    console.print(f"[bold green]Factory set up[/] in {repo} (project type: {stack}).")
+    for m in made:
+        console.print(f"  [green]+[/] {m}")
+    for k in skipped:
+        console.print(f"  [dim]= {k} (already there, left as is)[/]")
+    if committed:
+        console.print(f"  Saved as commit {committed[:10]}.")
+    console.print("\n[bold]Next:[/]")
+    console.print("  1. Open AGENTS.md and fill in the TODO lines (what the project does, its rules).")
+    if not st["unit"] or not st["inv"]:
+        console.print("  2. Set the test commands under \\[gate] in factory.toml (until then the gate shows WARN).")
+    console.print("  3. Restart Claude Code in this folder and approve the 'work-order-factory' server.")
+    console.print("     Then just ask: \"Open a work order to ...\"")
+    console.print("  [dim]Approving and adding rules (invariants) stay with you, in your own terminal.[/]")
+
+
 def cmd_new(args) -> None:
     ctx = Ctx(args)
+    if args.invariant:
+        human_only(ctx, "add human-owned invariants", args.by)
     n = len([e for e in ctx.ledger.entries() if e["event"] == "workorder.created"]) + 1
     wo_id = f"WO-{n:03d}"
     branch = f"wo/{wo_id}"
@@ -536,7 +681,7 @@ def cmd_gate(args) -> None:
     table = Table(title=f"{wo.id} gate {d['number']} on {report.code_sha[:10]}")
     table.add_column("Check"); table.add_column("Result"); table.add_column("Detail", overflow="fold")
     for c in report.checks:
-        table.add_row(c.name, "[green]PASS[/]" if c.passed else "[red]FAIL[/]", c.detail[:600])
+        table.add_row(c.name, _mark(c), c.detail[:600])
     console.print(table)
     if report.review:
         for f in report.review.get("findings", []):
@@ -667,6 +812,7 @@ def cmd_approve(args) -> None:
         console.print(f"[bold red]Approval refused:[/] {reason}")
         raise SystemExit(1)
 
+    human_only(ctx, "approve a work order", args.by, wo.id)
     if ctx.policy.require_independent_approver and args.by == wo.requester:
         refuse(f"{args.by} requested this change. The approver must be a different person.")
     gate = store.last_gate()
@@ -735,14 +881,14 @@ def cmd_ci(args) -> None:
     t = Table(title=f"CI gate on {gitops.head(repo)[:10]} vs {args.base} ({', '.join(wo_ids) or 'no work order'})")
     t.add_column("Check"); t.add_column("Result"); t.add_column("Detail", overflow="fold")
     for c in report.checks:
-        t.add_row(c.name, "[green]PASS[/]" if c.passed else "[red]FAIL[/]", c.detail[:400])
+        t.add_row(c.name, _mark(c), c.detail[:400])
     console.print(t)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a") as f:
             f.write(f"## Factory CI gate: {'PASS' if passed else 'FAIL'}\n\n| Check | Result | Detail |\n|---|---|---|\n")
             for c in report.checks:
-                f.write(f"| {c.name} | {'PASS' if c.passed else 'FAIL'} | {c.detail.splitlines()[0][:150] if c.detail else ''} |\n")
+                f.write(f"| {c.name} | {'PASS' if c.passed else ('FAIL' if c.blocking else 'WARN')} | {c.detail.splitlines()[0][:150] if c.detail else ''} |\n")
     console.print("[bold green]CI GATE PASS[/]" if passed else "[bold red]CI GATE FAIL[/]")
     if not passed:
         raise SystemExit(1)
@@ -760,6 +906,7 @@ def cmd_kill(args) -> None:
 
 def cmd_resume(args) -> None:
     ctx = Ctx(args)
+    human_only(ctx, "turn the kill switch off", args.by)
     if ctx.kill_file().exists():
         ctx.kill_file().unlink()
     ctx.ledger.append("kill_switch.off", None, args.by, note=args.note or "")
@@ -940,10 +1087,14 @@ def main(argv: list[str] | None = None) -> None:
         sp.add_argument("--replay-dir", help="recordings for the replay backend (default: $WO_REPLAY_DIR)")
         sp.add_argument("--record", help="save agent output here so it can be replayed later")
 
+    s = sub.add_parser("init", help="set up a repository for the factory (safe to re-run)"); s.set_defaults(fn=cmd_init)
+    s.add_argument("--user", help="your name (default: git config user.name)")
+    s.add_argument("--stack", choices=sorted(STACKS), help="project type (default: detected)")
+    s.add_argument("--no-commit", action="store_true", help="write the files but do not commit them")
     s = sub.add_parser("new", help="open a work order"); s.set_defaults(fn=cmd_new)
     s.add_argument("title"); s.add_argument("--intent", required=True); s.add_argument("--by", required=True)
     s.add_argument("--invariant", action="append", help="human-written invariant test file (repeatable)")
-    s.add_argument("--base", default="main")
+    s.add_argument("--base", help="branch to start from (default: main, else master, else current)")
     s = sub.add_parser("plan", help="planner agent splits the work"); s.set_defaults(fn=cmd_plan); s.add_argument("wo"); agent_opts(s)
     s = sub.add_parser("run", help="one implementer session"); s.set_defaults(fn=cmd_run); s.add_argument("wo"); agent_opts(s)
     s = sub.add_parser("gate", help="checks + reviewer agent"); s.set_defaults(fn=cmd_gate); s.add_argument("wo"); agent_opts(s)

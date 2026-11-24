@@ -39,6 +39,14 @@ def commit(cwd: Path, message: str, author_name: str, author_email: str, trailer
     return git(cwd, "rev-parse", "HEAD")
 
 
+def default_base(repo: Path) -> str:
+    """The branch work orders start from: main, else master, else whatever is checked out."""
+    for name in ("main", "master"):
+        if git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}", check=False):
+            return name
+    return git(repo, "rev-parse", "--abbrev-ref", "HEAD", check=False) or "main"
+
+
 def head(cwd: Path) -> str:
     return git(cwd, "rev-parse", "HEAD")
 

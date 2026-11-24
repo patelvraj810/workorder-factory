@@ -18,6 +18,14 @@ ROOT = Path(__file__).resolve().parent.parent
 REPLAYS = ROOT / "replays" / "WO-001"
 
 
+@pytest.fixture(autouse=True)
+def human_terminal(monkeypatch):
+    """Tests act as a human in their own terminal unless a test says otherwise."""
+    from factory.cli import AGENT_ENV_MARKERS
+    for m in (*AGENT_ENV_MARKERS, "WO_CHANNEL"):
+        monkeypatch.delenv(m, raising=False)
+
+
 # --- ledger -------------------------------------------------------------------------------
 
 def test_ledger_chain_verifies(tmp_path):
@@ -391,3 +399,101 @@ def test_scorecard_and_catalog_owner(repo, capsys, monkeypatch):
     assert "Agent scorecard" in out and "agreed with tests 2/2" in out
     pr = (repo / ".factory/worktrees/WO-001/.factory/WO-001/PR.md").read_text()
     assert "group:trading-platform-leads" in pr and "T2" in pr
+
+
+
+# --- human-only actions -----------------------------------------------------------------------
+
+@pytest.mark.parametrize("marker", ["CLAUDECODE", "AI_AGENT", "CLAUDE_CODE_ENTRYPOINT"])
+def test_agent_session_cannot_approve(repo, monkeypatch, marker):
+    open_and_build(repo)
+    gate_fails(repo)
+    wo(repo, "run", "WO-001")
+    wo(repo, "gate", "WO-001")
+    monkeypatch.setenv(marker, "1")
+    with pytest.raises(SystemExit, match="must be done by a human"):
+        wo(repo, "approve", "WO-001", "--by", "priya", "--merge")
+    events = Ledger(repo / ".factory/ledger.jsonl").entries()
+    assert events[-1]["event"] == "human_only.refused" and events[-1]["data"]["marker"] == marker
+    assert "merged" not in [e["event"] for e in events]
+    monkeypatch.delenv(marker)
+    wo(repo, "approve", "WO-001", "--by", "priya", "--merge")  # the human, in their own terminal
+
+
+def test_agent_session_cannot_resume_or_add_invariants(repo, monkeypatch):
+    wo(repo, "kill", "--by", "sec-lead", "--reason", "x")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    with pytest.raises(SystemExit, match="must be done by a human"):
+        wo(repo, "resume", "--by", "sec-lead")
+    with pytest.raises(SystemExit, match="must be done by a human"):
+        wo(repo, "new", "x", "--by", "vraj", "--intent", "x",
+           "--invariant", str(REPLAYS / "human" / "test_position_limit_invariants.py"))
+    assert (repo / ".factory" / "KILL").exists()
+
+
+# --- wo init and configurable gate commands -------------------------------------------------
+
+def _git_repo(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    gitops.git(path, "init", "-q", "-b", "main")
+    gitops.git(path, "config", "user.name", "dev")
+    gitops.git(path, "config", "user.email", "dev@example.com")
+    return path
+
+
+def test_init_sets_up_a_node_repo_and_never_overwrites(tmp_path):
+    r = _git_repo(tmp_path / "shop")
+    (r / "package.json").write_text('{"name": "shop", "scripts": {"test": "echo ok"}}')
+    (r / "AGENTS.md").write_text("my own rules\n")
+    (r / "notes.txt").write_text("user's unrelated work in progress\n")
+    gitops.git(r, "add", "package.json"); gitops.git(r, "commit", "-q", "-m", "start")
+
+    main(["--repo", str(r), "init", "--user", "vraj"])
+
+    pol = load_policy(r)
+    assert pol.unit_test_cmd == "npm test" and pol.invariant_cmd == ""
+    assert "npm test" in pol.allowed_bash and ".mcp.json" in pol.protected_paths
+    assert (r / "AGENTS.md").read_text() == "my own rules\n"          # existing file kept
+    assert (r / ".claude/skills/work-order/SKILL.md").exists()
+    srv = json.loads((r / ".mcp.json").read_text())["mcpServers"]["work-order-factory"]
+    assert srv["env"]["WO_REPO"] == str(r) and srv["env"]["WO_USER"] == "vraj"
+    assert ".factory/worktrees/" in (r / ".gitignore").read_text()
+    # Only the factory's files were committed; the user's other work was left alone.
+    committed = gitops.git(r, "show", "--name-only", "--format=", "HEAD").split()
+    assert "factory.toml" in committed and "notes.txt" not in committed and "AGENTS.md" not in committed
+    assert "?? notes.txt" in gitops.git(r, "status", "--porcelain")
+    assert [e["event"] for e in Ledger(r / ".factory" / "ledger.jsonl").entries()] == ["factory.initialized"]
+
+    before = (r / "factory.toml").read_text()
+    main(["--repo", str(r), "init", "--user", "vraj"])                # safe to re-run
+    assert (r / "factory.toml").read_text() == before
+
+
+def test_init_on_a_plain_folder_makes_a_repo(tmp_path):
+    r = tmp_path / "plain"; r.mkdir()
+    main(["--repo", str(r), "init", "--user", "vraj"])
+    assert (r / ".git").exists() and gitops.default_base(r) == "main"
+    assert load_policy(r).unit_test_cmd == ""        # 'other' stack: not set up yet
+
+
+def test_gate_runs_configured_commands_and_warns_when_not_set_up(tmp_path):
+    from factory.gate import check_tests
+    r = tmp_path / "w"; r.mkdir()
+    (r / "ok.sh").write_text("exit 0\n"); (r / "bad.sh").write_text("echo boom; exit 1\n")
+    assert check_tests(r, "unit tests", "sh ok.sh", invariants=False).passed
+    bad = check_tests(r, "unit tests", "sh bad.sh", invariants=False)
+    assert not bad.passed and bad.blocking and "boom" in bad.detail
+    warn = check_tests(r, "invariants (human-owned)", "", invariants=True)
+    assert not warn.passed and not warn.blocking                       # WARN, does not block
+    missing = check_tests(r, "unit tests", "no-such-tool-xyz run", invariants=False)
+    assert not missing.passed and missing.blocking and "command not found" in missing.detail
+    (r / "tests").mkdir()
+    none = check_tests(r, "unit tests", "python -m pytest -q tests/", invariants=False)
+    assert not none.passed and not none.blocking                       # pytest found no tests: WARN
+
+
+def test_money_rule_only_where_configured():
+    from factory.gate import check_no_float_money
+    diff = "+++ b/pricing/calc.py\n+    total: float = 0\n"
+    assert not check_no_float_money(diff, ["pricing/"]).passed
+    assert check_no_float_money(diff, ["orders/"]).passed

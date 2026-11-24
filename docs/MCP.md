@@ -16,11 +16,18 @@ the same `wo` command a human would run: same guard, same gate, same ledger, sam
 | `wo_kill` | Stop all agent sessions | Stopping is always allowed |
 
 **Not exposed, on purpose:** approve, merge, resume, adding invariants. Those stay with humans in a terminal.
+And if an agent tries the CLI instead (`wo approve` in its own shell), the CLI refuses when it
+detects an agent session (`CLAUDECODE`, `AI_AGENT` and similar markers, or `WO_CHANNEL=mcp`) and
+logs a `human_only.refused` event.
 Ledger entries made through MCP are marked `channel: mcp`.
 
 ## Config
 
 Install once: `pip install -e /path/to/workorder-factory` (this gives you the `wo-mcp` command).
+
+**Quickest:** run `wo init --user YOUR_NAME` in the target repo. It writes `.mcp.json` for Claude
+Code (with the full Python path, so it works without activating a virtual environment) and a
+Claude skill that explains the steps. The manual configs are below.
 
 **Claude Code** (`.mcp.json` in the target repo) and **Cursor** (`.cursor/mcp.json`):
 ```json
@@ -45,5 +52,7 @@ Then ask your tool: *"Open a work order to add per-symbol position limits, plan 
 sessions until the gate passes. Stop and tell me if anything is refused."*
 
 ## Limits
+- The agent-session check is a speed bump: an agent with a shell could unset the markers. The wall
+  is server-side: branch protection and a required CODEOWNER review.
 - Identity is whatever `WO_USER` says. Production: the server gets identity from SSO, not an env variable.
 - Tested in-process (`tests/test_harness.py::test_mcp_server_exposes_no_approval_tools`), not yet in every client.

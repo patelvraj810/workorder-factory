@@ -144,7 +144,7 @@ wrong way. So I treat the gate as a security boundary and threat-model it like o
 | 13 | Something looks wrong right now | Odd tool calls across many work orders | Kill switch: `wo kill` stops every new session at once; only a human can `wo resume` | ✅ |
 | 15 | Session dies halfway | Laptop sleeps or process is killed mid-edit; half-written files get mixed into the next session's commit | **Durable work orders**: the next run finds the unfinished session, keeps the leftovers as evidence, resets the sandbox to the last good commit, records it as abandoned (with the tool calls it made, logged to disk as they happened), then continues. Never wipes changes no agent owns | ✅ |
 | 16 | Someone skips the factory | Pushes agent code straight to a PR | **Same gate in CI**: `wo ci` re-runs the deterministic checks on the PR, checks every agent commit has provenance trailers, and checks the recorded gate matches the code | ✅ (workflow file; not run on GitHub here) |
-| 14 | Agent approves via its tools | Agent in Claude Code calls an "approve" tool | The MCP server has no approve, merge or resume tool. Agents can stop things, never start them again | ✅ |
+| 14 | Agent approves via its tools | Agent in Claude Code calls an "approve" tool, or runs `wo approve` in its own shell | The MCP server has no approve, merge or resume tool. The CLI refuses approve, resume and adding invariants when it detects an agent session, and logs the attempt. Agents can stop things, never start them again | ✅ (CLI check is a speed bump; the wall is branch protection) |
 
 **Measured:** `evals/run_evals.py` runs 10 of these as seeded agent changes, including the flip
 loophole found in the live run. 10/10 caught, and the correct
@@ -279,8 +279,12 @@ The ops analyst did something valuable. The answer is a **paved road**, not a ba
   In practice: a Backstage-style **software template** creates the repo with `AGENTS.md`, `factory.toml`,
   an empty `invariants/` folder and a `catalog-info.yaml` that records the owner, the engineering
   sponsor and the risk tier. Engineering can finally see every app that exists and who owns it.
+  The prototype has the first half of this: `wo init` sets up any folder (rules file, `AGENTS.md`,
+  `invariants/`, a Claude skill and the MCP config), so the analyst talks to Claude in plain English
+  and never touches a terminal except to approve or add a rule. Plain-English guide: `docs/USING-IT.md`.
 - **Invariants in plain language**: the analyst writes examples — "given these two files, these 3 rows
-  must be flagged" — the agent turns them into tests, the analyst confirms. That is the analyst's
+  must be flagged" — the agent drafts them as tests in `.factory/proposals/`, the analyst confirms and
+  adds them as the owner. That is the analyst's
   equivalent of owning invariants.
 - **Engineering sponsor** approves (approver ≠ requester still holds). The analyst never becomes an engineer.
 

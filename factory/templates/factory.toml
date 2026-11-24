@@ -1,0 +1,39 @@
+# Factory policy for this repository. Human-owned: agents can never edit this file.
+# Changes take effect once committed to the base branch (the factory reads the committed copy).
+
+[policy]
+# Paths agents may never write.
+protected_paths = ["invariants/", "factory.toml", "CODEOWNERS", ".github/", ".mcp.json", ".claude/", ".factory/ledger.jsonl"]
+
+# Files agents may never read (secrets).
+secret_paths = [".env", ".env.*", "*.pem", "*.key"]
+
+# Max changed lines (added + removed) in one work order.
+max_diff_lines = 250
+
+# Cost limits in USD (your own Claude account is charged).
+max_session_budget_usd = 1.50
+max_workorder_budget_usd = 5.00
+
+# After this many failed gates in a row, the agents stop and hand the work back to you.
+max_gate_failures = 3
+
+# Team-wide stop. For an instant stop, run `wo kill`.
+kill_switch = false
+
+# Commands the implementer agent may run (no chaining with ; && | is ever allowed).
+allowed_bash = __ALLOWED_BASH__
+
+[gate]
+# How this project checks itself. The factory runs these, never the agent.
+# An empty command shows as WARN (not set up yet) instead of failing.
+unit_tests = "__UNIT_TESTS__"
+invariants = "__INVARIANTS__"
+# Folders where money or quantities live: any float added there fails the gate. Empty = off.
+money_paths = []
+
+[review]
+# The approver must be a different person from the one who asked for the work.
+require_independent_approver = true
+# Reviewer-agent findings at or above this severity block the gate.
+blocking_severity = "high"

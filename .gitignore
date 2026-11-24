@@ -4,3 +4,7 @@ __pycache__/
 /tmp/
 *.egg-info/
 .venv/
+.factory/
+.env
+.env.*
+.DS_Store

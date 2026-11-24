@@ -19,6 +19,11 @@ class Policy:
     kill_switch: bool = False
     max_gate_failures: int = 3
     max_workorder_budget_usd: float = 5.00
+    # [gate]: how this project runs its checks. Python/pytest by default; any command works.
+    setup_cmd: str = ""
+    unit_test_cmd: str = "python -m pytest -q tests/"
+    invariant_cmd: str = "python -m pytest -q invariants/"
+    money_paths: list[str] = field(default_factory=list)
 
     def is_protected(self, rel_path: str) -> bool:
         rel = rel_path.lstrip("./")
@@ -62,7 +67,7 @@ def load_policy(repo: Path) -> Policy:
 
 def _parse(text: str) -> Policy:
     data = tomllib.loads(text)
-    pol, rev = data.get("policy", {}), data.get("review", {})
+    pol, rev, gate = data.get("policy", {}), data.get("review", {}), data.get("gate", {})
     return Policy(
         protected_paths=pol.get("protected_paths", []),
         secret_paths=pol.get("secret_paths", []),
@@ -74,6 +79,10 @@ def _parse(text: str) -> Policy:
         kill_switch=bool(pol.get("kill_switch", False)),
         max_gate_failures=int(pol.get("max_gate_failures", 3)),
         max_workorder_budget_usd=float(pol.get("max_workorder_budget_usd", 5.0)),
+        setup_cmd=str(gate.get("setup", "")),
+        unit_test_cmd=str(gate.get("unit_tests", "python -m pytest -q tests/")),
+        invariant_cmd=str(gate.get("invariants", "python -m pytest -q invariants/")),
+        money_paths=list(gate.get("money_paths", [])),
     )
 
 

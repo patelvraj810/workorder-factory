@@ -26,6 +26,13 @@ kill_switch = false
 # Commands the implementer agent may run.
 allowed_bash = ["python -m pytest", "pytest", "git diff", "git status", "ls", "cat"]
 
+[gate]
+# How this project runs its checks. The factory runs these, never the agent.
+unit_tests = "python -m pytest -q tests/"
+invariants = "python -m pytest -q invariants/"
+# Folders where money and quantities live: any float added there fails the gate.
+money_paths = ["orders/"]
+
 [review]
 # Approver must be a different human from the requester.
 require_independent_approver = true

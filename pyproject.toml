@@ -13,7 +13,7 @@ wo-mcp = "factory.mcp_server:main"
 packages = ["factory"]
 
 [tool.setuptools.package-data]
-factory = ["prompts/*.md"]
+factory = ["prompts/*.md", "templates/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

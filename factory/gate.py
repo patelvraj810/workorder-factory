@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
@@ -72,14 +73,33 @@ def _is_agent(email: str) -> bool:
     return email in (gitops.AGENT_EMAIL, gitops.FACTORY_EMAIL)
 
 
-def _pytest(worktree: Path, target: str) -> tuple[bool, str]:
-    cmd = [sys.executable, "-m", "pytest", "-q", target, "-p", "no:cacheprovider", "--hypothesis-seed=0"]
-    if target.startswith("invariants"):
-        cmd.append("--noconftest")  # agent-written conftest.py can never influence the invariants
-    p = subprocess.run(cmd, cwd=worktree, capture_output=True, text=True, timeout=600)
+def _is_pytest(argv: list[str]) -> bool:
+    return bool(argv) and (argv[0] == "pytest" or argv[:3] == ["python", "-m", "pytest"]
+                           or argv[:3] == ["python3", "-m", "pytest"])
+
+
+def run_test_command(worktree: Path, cmd: str, invariants: bool) -> tuple[str, str]:
+    """Run one configured test command. Returns (status, detail); status is pass | fail | none.
+
+    pytest commands get extras: no cache, a fixed Hypothesis seed (reproducible), and for the
+    invariants --noconftest, so an agent-written conftest.py can never influence them.
+    Any other command (npm test, npx vitest run invariants/, go test ./...) runs as written.
+    """
+    argv = shlex.split(cmd)
+    if _is_pytest(argv):
+        rest = argv[1:] if argv[0] == "pytest" else argv[3:]
+        argv = [sys.executable, "-m", "pytest", *rest, "-p", "no:cacheprovider", "--hypothesis-seed=0"]
+        if invariants:
+            argv.append("--noconftest")
+    try:
+        p = subprocess.run(argv, cwd=worktree, capture_output=True, text=True, timeout=900)
+    except FileNotFoundError:
+        return "fail", f"command not found: {argv[0]} (check [gate] in factory.toml)"
     out = (p.stdout + p.stderr).strip()
     if p.returncode == 0:
-        return True, out.splitlines()[-1] if out else "ok"
+        return "pass", out.splitlines()[-1] if out else "ok"
+    if _is_pytest(shlex.split(cmd)) and p.returncode == 5:
+        return "none", "no tests found"
     # Keep the useful part: failing test names and Hypothesis' minimal failing example.
     lines = out.splitlines()
     keep = [ln for ln in lines if ln.startswith("FAILED")]
@@ -91,7 +111,18 @@ def _pytest(worktree: Path, target: str) -> tuple[bool, str]:
                 if clean == ")":
                     break
             break
-    return False, "\n".join(keep) if keep else out[-1500:]
+    return "fail", "\n".join(keep) if keep else out[-1500:]
+
+
+def check_tests(worktree: Path, name: str, cmd: str, invariants: bool) -> Check:
+    if not cmd.strip():
+        return Check(name, False, "not set up yet: add the command under gate in factory.toml", blocking=False)
+    status, detail = run_test_command(worktree, cmd, invariants)
+    if status == "none":
+        msg = ("no invariants yet: a human should write the rules that must never break"
+               if invariants else "no unit tests found")
+        return Check(name, False, msg, blocking=False)
+    return Check(name, status == "pass", detail)
 
 
 def check_protected(worktree: Path, base: str, policy: Policy) -> Check:
@@ -149,11 +180,12 @@ def check_secrets(diff: str) -> Check:
     return Check("secret scan", not hits, "; ".join(hits) if hits else "no secrets in added lines")
 
 
-def check_no_float_money(diff: str) -> Check:
+def check_no_float_money(diff: str, money_paths: list[str]) -> Check:
     """Repo-specific rule from AGENTS.md, as a cheap deterministic check."""
     hits = [f"{p}: {ln.strip()}" for p, ln in _added_lines(diff)
-            if p.startswith("orders/") and re.search(r"\bfloat\s*\(|:\s*float\b|->\s*float\b", ln)]
-    return Check("no float on money", not hits, "; ".join(hits[:5]) if hits else "no float in orders/")
+            if p.startswith(tuple(money_paths)) and re.search(r"\bfloat\s*\(|:\s*float\b|->\s*float\b", ln)]
+    where = ", ".join(money_paths)
+    return Check("no float on money", not hits, "; ".join(hits[:5]) if hits else f"no float in {where}")
 
 
 def check_sast(worktree: Path, base: str) -> Check:
@@ -183,13 +215,12 @@ def run_checks(worktree: Path, base: str, wo_id: str, policy: Policy) -> GateRep
         check_test_config(worktree, base),
         check_diff_size(worktree, base, policy),
         check_secrets(diff),
-        check_no_float_money(diff),
         check_sast(worktree, base),
     ]
-    ok, detail = _pytest(worktree, "invariants/")
-    checks.append(Check("invariants (human-owned)", ok, detail))
-    ok, detail = _pytest(worktree, "tests/")
-    checks.append(Check("unit tests", ok, detail))
+    if policy.money_paths:
+        checks.insert(4, check_no_float_money(diff, policy.money_paths))
+    checks.append(check_tests(worktree, "invariants (human-owned)", policy.invariant_cmd, invariants=True))
+    checks.append(check_tests(worktree, "unit tests", policy.unit_test_cmd, invariants=False))
     report = GateReport(work_order=wo_id, code_sha=code_sha, base=base, passed=False, checks=checks)
     report.passed = all(c.passed or not c.blocking for c in checks)
     return report
