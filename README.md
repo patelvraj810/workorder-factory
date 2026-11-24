@@ -55,7 +55,7 @@ pip install -e .
 ./demo.sh                     # main story, replay backend — deterministic, the demo backup
 ./demo-when-it-goes-wrong.sh  # crash recovery + stop limit
 PAUSE=1 ./demo.sh             # step through it while presenting
-python -m pytest -q tests/    # 48 harness tests, including the gate evals
+python -m pytest -q tests/    # 50 harness tests, including the gate evals
 python evals/run_evals.py     # 10 agent failure modes the gate must catch
 ```
 
@@ -119,7 +119,7 @@ sample_repo/        synthetic order-validation service (target), with AGENTS.md,
                     catalog-info.yaml, invariants/, .github/workflows/factory-gate.yml
 replays/WO-001/     recorded agent outputs for the demo story + the human-written invariant
 evals/              gate eval suite (10 failure modes)
-tests/              harness tests (48)
+tests/              harness tests (50)
 evidence/           live run with real agents (logs, ledger, reviewer finding)
 docs/               DESIGN.md (the 9 questions), MCP.md, USING-IT.md (plain-English guide)
 ```

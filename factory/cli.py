@@ -584,7 +584,8 @@ def cmd_run(args) -> None:
 
     last_gate = store.last_gate()
     sessions = ctx.events(wo.id, "session.completed")
-    fixing = bool(last_gate and not last_gate["passed"]
+    # Finish the planned features first; fix gate findings once everything planned is built.
+    fixing = bool(last_gate and not last_gate["passed"] and store.next_feature() is None
                   and (not sessions or sessions[-1]["data"]["after_gate"] < last_gate["number"]))
     if fixing:
         feature = Feature(id="FIX", title=f"Fix gate {last_gate['number']} failures", acceptance=["gate passes"])
@@ -650,6 +651,10 @@ def cmd_gate(args) -> None:
     wt = ctx.worktree(wo.id)
     wo_dict = json.loads((store.dir / "workorder.json").read_text())
     ctx.recover(wo)  # never gate half-written or uncommitted code: the report must match the commit it names
+    unfinished = [f for f in store.load_features() if f.status != "done"]
+    if unfinished:
+        raise SystemExit(f"Not gating yet: {', '.join(f'{f.id} is {f.status}' for f in unfinished)}. "
+                         f"Run `wo run {wo.id}` to finish it first. No gate was counted.")
     n = len(store.gate_reports()) + 1
     with console.status("Gate: tests, invariants, scans..."):
         report = run_checks(wt, wo.base_branch, wo.id, ctx.policy)

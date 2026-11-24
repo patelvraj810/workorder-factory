@@ -527,3 +527,23 @@ def test_hook_allows_checked_writes_explicitly_and_denies_the_rest(tmp_path):
     assert not bad and hook_decision("Write", bad, why)["hookSpecificOutput"]["permissionDecision"] == "deny"
     out, why = guard("Edit", {"file_path": str(tmp_path / "elsewhere.py")}, wt, pol)
     assert not out and "outside" in why
+
+
+def test_blocked_feature_is_retried_and_gate_waits_for_it(repo):
+    from factory.workorder import WorkOrderStore
+    wo(repo, "new", "Per-symbol position limits", "--intent", "limits", "--by", "vraj")
+    wo(repo, "plan", "WO-001")
+    store = WorkOrderStore(repo / ".factory" / "worktrees" / "WO-001", "WO-001")
+    feats = store.load_features(); feats[0].status = "blocked"; store.save_features(feats)
+    wt = repo / ".factory" / "worktrees" / "WO-001"
+    gitops.git(wt, "-c", "user.name=lead", "-c", "user.email=lead@example.com", "commit", "-qam", "mark blocked")
+    assert store.next_feature().id == feats[0].id                     # blocked = unfinished, retried
+    with pytest.raises(SystemExit, match="Not gating yet"):
+        main(["--repo", str(repo), "gate", "WO-001", "--no-review"])
+    assert store.gate_reports() == []                                   # nothing counted toward the stop limit
+
+
+def test_missing_test_folder_is_a_warning_not_a_failure(tmp_path):
+    from factory.gate import check_tests
+    c = check_tests(tmp_path, "unit tests", "python -m pytest -q tests/", invariants=False)
+    assert not c.passed and not c.blocking
