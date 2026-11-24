@@ -174,8 +174,8 @@ def check_sast(worktree: Path, base: str) -> Check:
     return Check("SAST (bandit)", True, f"{len(files)} files, {len(results)} low-severity notes")
 
 
-def run_gate(worktree: Path, base: str, wo: dict[str, Any], policy: Policy, backend, replay_key: str,
-             run_review: bool = True) -> GateReport:
+def run_checks(worktree: Path, base: str, wo_id: str, policy: Policy) -> GateReport:
+    """Deterministic checks only. Cheap, repeatable, no model calls."""
     code_sha = gitops.head(worktree)
     diff = gitops.diff_text(worktree, base)
     checks = [
@@ -190,22 +190,37 @@ def run_gate(worktree: Path, base: str, wo: dict[str, Any], policy: Policy, back
     checks.append(Check("invariants (human-owned)", ok, detail))
     ok, detail = _pytest(worktree, "tests/")
     checks.append(Check("unit tests", ok, detail))
-
-    report = GateReport(work_order=wo["id"], code_sha=code_sha, base=base, passed=False, checks=checks)
-    if run_review:
-        check_summary = "\n".join(f"- {c.name}: {'pass' if c.passed else 'FAIL'} — {c.detail.splitlines()[0] if c.detail else ''}"
-                                  for c in checks)
-        prompt = render("reviewer", wo_id=wo["id"], title=wo["title"], intent=wo["intent"],
-                        invariants="\n".join(f"- {p}" for p in wo["invariants"]) or "- (repo invariants only)",
-                        check_summary=check_summary, diff=diff[:60000])
-        res: AgentResult = backend.run("reviewer", prompt, worktree, REVIEW_SCHEMA, policy, replay_key=replay_key)
-        report.review = res.structured
-        report.reviewer_model = res.model
-        report.cost_usd = res.cost_usd
-        threshold = SEVERITY_RANK[policy.blocking_severity]
-        blocking = [f for f in res.structured.get("findings", []) if SEVERITY_RANK.get(f.get("severity"), 0) >= threshold]
-        checks.append(Check("independent reviewer agent", not blocking,
-                            f"{res.structured.get('verdict')}: {len(blocking)} blocking finding(s), "
-                            f"{len(res.structured.get('findings', []))} total"))
+    report = GateReport(work_order=wo_id, code_sha=code_sha, base=base, passed=False, checks=checks)
     report.passed = all(c.passed or not c.blocking for c in checks)
+    return report
+
+
+def reviewer_prompt(report: GateReport, wo: dict[str, Any], diff: str) -> str:
+    check_summary = "\n".join(f"- {c.name}: {'pass' if c.passed else 'FAIL'} — {c.detail.splitlines()[0] if c.detail else ''}"
+                              for c in report.checks)
+    return render("reviewer", wo_id=wo["id"], title=wo["title"], intent=wo["intent"],
+                  invariants="\n".join(f"- {p}" for p in wo["invariants"]) or "- (repo invariants only)",
+                  check_summary=check_summary, diff=diff[:60000])
+
+
+def apply_review(report: GateReport, res: AgentResult, policy: Policy) -> None:
+    """Add the independent reviewer's verdict as the last check."""
+    report.review = res.structured
+    report.reviewer_model = res.model
+    report.cost_usd = res.cost_usd
+    threshold = SEVERITY_RANK[policy.blocking_severity]
+    blocking = [f for f in res.structured.get("findings", []) if SEVERITY_RANK.get(f.get("severity"), 0) >= threshold]
+    report.checks.append(Check("independent reviewer agent", not blocking,
+                               f"{res.structured.get('verdict')}: {len(blocking)} blocking finding(s), "
+                               f"{len(res.structured.get('findings', []))} total"))
+    report.passed = all(c.passed or not c.blocking for c in report.checks)
+
+
+def run_gate(worktree: Path, base: str, wo: dict[str, Any], policy: Policy, backend, replay_key: str,
+             run_review: bool = True) -> GateReport:
+    """Convenience wrapper (used by evals). The CLI runs the reviewer through an audited session instead."""
+    report = run_checks(worktree, base, wo["id"], policy)
+    if run_review:
+        prompt = reviewer_prompt(report, wo, gitops.diff_text(worktree, base))
+        apply_review(report, backend.run("reviewer", prompt, worktree, REVIEW_SCHEMA, policy, replay_key=replay_key), policy)
     return report

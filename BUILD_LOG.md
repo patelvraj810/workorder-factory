@@ -14,6 +14,9 @@ Times are wall-clock. Sections marked **[Vraj]** are for me to fill in honestly 
 | 22:14–22:16 | Demo recordings (3 sessions, plan, 2 reviews) + demo.sh, first full run | Agent |
 | 22:16–22:19 | Gate evals (9 cases), harness tests (24) | Agent |
 | 22:19–22:21 | README, DESIGN.md, this log | Agent |
+| 22:24–22:47 | Stopped building. Agent explained the assignment and plan in plain English; I compared ideas and chose what to add | Me + agent |
+| 22:47–23:00 | Research: how other governed agent-delivery products and open standards work. Found the FINOS SDLC Common Controls catalog (RI-13 / MI-23 cover exactly our problem). I picked the additions | Me + agent |
+| 23:00–23:12 | Round 2: audit-first (fail closed), FINOS MI-23 provenance + `wo provenance`, signed ledger, stop limit + hand-back, work-order budget, kill switch, MCP server, delivery-health stats, WOULD-NOT-SHIP.md, README real-vs-mocked, DESIGN.md control map | Agent, from my list |
 | **[Vraj]** | Review of code, design doc, live run on my laptop, re-record replays, slides/recording | Me |
 
 ## What I delegated
@@ -41,13 +44,19 @@ Times are wall-clock. Sections marked **[Vraj]** are for me to fill in honestly 
 | 2 | **Gate read `factory.toml` from the branch under review** | First version loaded policy from the working copy | Policy now always read from the trusted base ref (`load_policy_at`). Eval case `policy_tamper` added | Found by writing the eval, not by reading the code. Threat-model the gate like any security boundary |
 | 3 | Gate output didn't show Hypothesis' failing example | Hypothesis changed its message from "Falsifying example" to "Failing test case" | Parser handles both | Don't parse tool output you don't control without a test |
 | 4 | `demo.sh` stopped at step 8 | `wo pr \| head` + `set -o pipefail` → SIGPIPE exit | Write PR to file, print first lines | Run the demo end-to-end after every change |
+| 6 | MCP server import failed | The installed `mcp` package is 2.x, which renamed `FastMCP` to `MCPServer` | Import tries 2.x first, falls back to 1.x | Library APIs move fast; pin or support both |
+| 7 | Old tests broke after round 2 | `wo gate` now exits non-zero on a failed gate (so scripts and CI can stop) | Tests updated to expect it; demo uses `\|\| true` on purpose | Exit codes are part of the interface |
+| 8 | First provenance design missed the reviewer agent | The reviewer ran inside the gate, outside the audited session path | Split the gate: deterministic checks, then the reviewer as its own audited session | "Every agent step" means every one, including the checker |
 | 5 | Diff-size count includes the human's invariant file | Gate counts all non-`.factory` lines | Left as is, noted | Open question: should human-owned lines count toward the agent's diff budget? |
 
 ## Time spent  **[Vraj — update]**
-- Agent build time: ~15 minutes wall-clock for the prototype, ~5 minutes for docs.
+- Round 1 agent build: ~15 minutes wall-clock for the prototype, ~5 minutes for docs.
+- Planning and research with me: ~35 minutes (22:24–23:00).
+- Round 2 agent build: ~12 minutes (audit-first, MI-23, stop limits, kill switch, MCP, docs).
 - My time: planning 5 min + **[review __ min]** + **[live run + recording __ min]** + **[slides __ min]**.
 - Why: I spent the time on the gate and its evals because that is where trust is won or lost.
-  I cut: real container isolation, GitHub check integration, non-engineer paved road (design only).
+  I cut: real container isolation, model gateway, parallel workers, GitHub check integration,
+  non-engineer paved road (all design only).
 
 ## Tools used
 - Claude (agent session with shell + file tools) for planning, code, tests, docs.

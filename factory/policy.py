@@ -16,6 +16,9 @@ class Policy:
     allowed_bash: list[str] = field(default_factory=list)
     require_independent_approver: bool = True
     blocking_severity: str = "high"
+    kill_switch: bool = False
+    max_gate_failures: int = 3
+    max_workorder_budget_usd: float = 5.00
 
     def is_protected(self, rel_path: str) -> bool:
         rel = rel_path.lstrip("./")
@@ -68,4 +71,14 @@ def _parse(text: str) -> Policy:
         allowed_bash=pol.get("allowed_bash", []),
         require_independent_approver=bool(rev.get("require_independent_approver", True)),
         blocking_severity=rev.get("blocking_severity", "high"),
+        kill_switch=bool(pol.get("kill_switch", False)),
+        max_gate_failures=int(pol.get("max_gate_failures", 3)),
+        max_workorder_budget_usd=float(pol.get("max_workorder_budget_usd", 5.0)),
     )
+
+
+def policy_sha(repo: Path, ref: str) -> str:
+    import hashlib
+    import subprocess
+    p = subprocess.run(["git", "show", f"{ref}:factory.toml"], cwd=repo, capture_output=True, text=True)
+    return hashlib.sha256(p.stdout.encode()).hexdigest()

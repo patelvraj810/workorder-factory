@@ -12,8 +12,16 @@ secret_paths = [".env", "*.pem", "*.key"]
 # Max changed lines (added + removed) in one work order, excluding .factory/.
 max_diff_lines = 250
 
-# Cost guard per agent session, in USD.
+# Cost guards, in USD. A session stops at its budget; a work order is handed back at its budget.
 max_session_budget_usd = 1.50
+max_workorder_budget_usd = 5.00
+
+# Stop limit: after this many failed gates in a row, agents stop and the work order is
+# handed back to its owner with a summary. No pull request is opened.
+max_gate_failures = 3
+
+# Team-wide kill switch (versioned). For an instant stop without a merge, use `wo kill`.
+kill_switch = false
 
 # Commands the implementer agent may run.
 allowed_bash = ["python -m pytest", "pytest", "git diff", "git status", "ls", "cat"]

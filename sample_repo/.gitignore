@@ -1,3 +1,5 @@
 __pycache__/
 .hypothesis/
 .factory/worktrees/
+.factory/ledger.jsonl
+.factory/KILL

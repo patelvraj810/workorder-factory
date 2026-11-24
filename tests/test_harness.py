@@ -83,7 +83,6 @@ def test_guard(wt, tool, inp, allowed):
 def repo(tmp_path, monkeypatch):
     r = tmp_path / "repo"
     shutil.copytree(ROOT / "sample_repo", r)
-    (r / ".gitignore").write_text((r / ".gitignore").read_text() + ".factory/worktrees/\n.factory/ledger.jsonl\n")
     gitops.git(r, "init", "-q", "-b", "main")
     gitops.git(r, "add", "-A")
     gitops.git(r, "-c", "user.name=lead", "-c", "user.email=lead@example.com", "commit", "-qm", "base")
@@ -104,9 +103,14 @@ def open_and_build(repo):
     wo(repo, "run", "WO-001")
 
 
+def gate_fails(repo, *extra):
+    with pytest.raises(SystemExit):
+        wo(repo, "gate", "WO-001", *extra)
+
+
 def test_full_flow_red_then_green_then_merge(repo):
     open_and_build(repo)
-    wo(repo, "gate", "WO-001")
+    gate_fails(repo)
     gates = sorted((repo / ".factory/worktrees/WO-001/.factory/WO-001/gates").glob("*.json"))
     first = json.loads(gates[0].read_text())
     assert first["passed"] is False
@@ -131,7 +135,7 @@ def test_full_flow_red_then_green_then_merge(repo):
 
 def test_approval_refused_when_code_changes_after_gate(repo):
     open_and_build(repo)
-    wo(repo, "gate", "WO-001")
+    gate_fails(repo)
     wo(repo, "run", "WO-001")
     wo(repo, "gate", "WO-001")
     wt = repo / ".factory/worktrees/WO-001"
@@ -177,3 +181,113 @@ def test_gate_evals_all_correct():
     import sys
     p = subprocess.run([sys.executable, str(ROOT / "evals" / "run_evals.py")], capture_output=True, text=True)
     assert p.returncode == 0, p.stdout[-2000:]
+
+
+# --- audit first, provenance, stop limits, kill switch, signing, MCP -------------------------
+
+def test_audit_first_agent_never_starts_if_ledger_write_fails(repo, monkeypatch):
+    wo(repo, "new", "x", "--by", "vraj", "--intent", "x")
+    called = []
+    from factory import agents
+    monkeypatch.setattr(agents.ReplayBackend, "run", lambda *a, **k: called.append(1))
+    real_append = Ledger.append
+
+    def broken(self, event, *a, **k):
+        if event == "session.started":
+            raise OSError("disk full")
+        return real_append(self, event, *a, **k)
+    monkeypatch.setattr(Ledger, "append", broken)
+    with pytest.raises(SystemExit, match="NOT started"):
+        wo(repo, "plan", "WO-001")
+    assert called == []  # fail closed: no record, no agent
+
+
+def test_provenance_has_all_mi23_fields(repo):
+    open_and_build(repo)
+    from factory.cli import Ctx, provenance
+    import argparse
+    ok, rows, problems = provenance(Ctx(argparse.Namespace(repo=str(repo))), "WO-001")
+    assert ok, problems
+    assert [r["role"] for r in rows] == ["planner", "implementer", "implementer"]
+    started = [e for e in Ledger(repo / ".factory/ledger.jsonl").entries() if e["event"] == "session.started"][0]["data"]
+    for field in ("harness", "model", "tools_allowed", "context", "task", "accountable_human"):
+        assert started[field]
+    assert "AGENTS.md" in started["context"] and started["accountable_human"] == "vraj"
+
+
+def test_approval_refused_when_agent_commit_has_no_provenance(repo):
+    open_and_build(repo)
+    gate_fails(repo)
+    wo(repo, "run", "WO-001")
+    wo(repo, "gate", "WO-001")
+    wt = repo / ".factory/worktrees/WO-001"
+    (wt / ".factory" / "WO-001" / "note.md").write_text("unrecorded agent work\n")
+    gitops.commit(wt, "sneaky agent commit", gitops.AGENT_NAME, gitops.AGENT_EMAIL, {})
+    with pytest.raises(SystemExit):
+        wo(repo, "approve", "WO-001", "--by", "priya")
+    refused = [e for e in Ledger(repo / ".factory/ledger.jsonl").entries() if e["event"] == "approval.refused"]
+    assert "provenance incomplete" in refused[-1]["data"]["reason"]
+
+
+def test_stop_limit_hands_back_and_blocks_agents_and_pr(repo):
+    open_and_build(repo)  # session 2 has the direction bug
+    for _ in range(3):
+        gate_fails(repo, "--no-review")
+    events = [e["event"] for e in Ledger(repo / ".factory/ledger.jsonl").entries()]
+    assert "workorder.handed_back" in events
+    assert (repo / ".factory/worktrees/WO-001/.factory/WO-001/HANDBACK.md").exists()
+    with pytest.raises(SystemExit, match="handed back"):
+        wo(repo, "run", "WO-001")
+    with pytest.raises(SystemExit, match="No change worth reviewing"):
+        wo(repo, "pr", "WO-001")
+
+
+def test_workorder_budget_hands_back(repo, monkeypatch):
+    toml = repo / "factory.toml"
+    toml.write_text(toml.read_text().replace("max_workorder_budget_usd = 5.00", "max_workorder_budget_usd = 0.30"))
+    gitops.git(repo, "-c", "user.name=lead", "-c", "user.email=lead@example.com", "commit", "-qam", "lower budget")
+    wo(repo, "new", "x", "--by", "vraj", "--intent", "x",
+       "--invariant", str(REPLAYS / "human" / "test_position_limit_invariants.py"))
+    wo(repo, "plan", "WO-001")          # $0.21
+    wo(repo, "run", "WO-001")           # $0.18 -> total $0.39
+    with pytest.raises(SystemExit):
+        wo(repo, "run", "WO-001")       # over budget: handed back, no session started
+    events = [e["event"] for e in Ledger(repo / ".factory/ledger.jsonl").entries()]
+    assert events[-1] == "workorder.handed_back" and events.count("session.started") == 2
+
+
+def test_kill_switch_blocks_then_resume_allows(repo):
+    wo(repo, "new", "x", "--by", "vraj", "--intent", "x")
+    wo(repo, "kill", "--by", "sec-lead", "--reason", "suspicious tool use")
+    with pytest.raises(SystemExit, match="Kill switch"):
+        wo(repo, "plan", "WO-001")
+    wo(repo, "resume", "--by", "sec-lead")
+    wo(repo, "plan", "WO-001")
+    events = [e["event"] for e in Ledger(repo / ".factory/ledger.jsonl").entries()]
+    assert ["kill_switch.on", "session.blocked", "kill_switch.off", "session.started"] == \
+           [e for e in events if e in ("kill_switch.on", "session.blocked", "kill_switch.off", "session.started")]
+
+
+def test_signed_ledger_rejects_wrong_key(tmp_path):
+    led = Ledger(tmp_path / "l.jsonl", key="right-key")
+    for i in range(3):
+        led.append("x", "WO-1", "a", i=i)
+    assert Ledger(tmp_path / "l.jsonl", key="right-key").verify()[0]
+    ok, _, msg = Ledger(tmp_path / "l.jsonl", key="wrong-key").verify()
+    assert not ok and "signature" in msg
+
+
+def test_mcp_server_exposes_no_approval_tools(repo, monkeypatch):
+    import anyio
+    monkeypatch.setenv("WO_REPO", str(repo))
+    monkeypatch.setenv("WO_USER", "vraj")
+    from factory.mcp_server import server
+
+    async def go():
+        names = {t.name for t in await server.list_tools()}
+        assert {"wo_new", "wo_run", "wo_gate", "wo_pr", "wo_kill"} <= names
+        assert not names & {"wo_approve", "wo_merge", "wo_resume"}
+        await server.call_tool("wo_new", {"title": "via mcp", "intent": "test"})
+    anyio.run(go)
+    created = [e for e in Ledger(repo / ".factory/ledger.jsonl").entries() if e["event"] == "workorder.created"][0]
+    assert created["actor"] == "vraj" and created["data"]["channel"] == "mcp"
